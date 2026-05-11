@@ -18,6 +18,7 @@ const subscriptionSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+
     endDate: {
         type: Date,
         required: true
@@ -34,22 +35,35 @@ const subscriptionSchema = new mongoose.Schema({
         default: false
     },
 
+    // Payment Information
     paymentInfo: {
         transactionId: String,
         paymentMethod: String,
-        amountPaid: Number
+        amountPaid: Number,
+        currency: {
+            type: String,
+            default: "USD"
+        }
+    },
+
+    // For future use (upgrade/downgrade)
+    previousPlan: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "SubscriptionPlan"
     }
 
 }, { 
     timestamps: true 
 });
 
-// Auto update status when expired
+// Auto-update status if subscription is expired
 subscriptionSchema.pre('save', function (next) {
-    if (this.endDate < new Date() && this.status === "active") {
+    const now = new Date();
+    if (this.endDate < now && this.status === "active") {
         this.status = "expired";
     }
     next();
 });
 
-module.exports = mongoose.model("Subscription", subscriptionSchema);
+const subscriptionModel = mongoose.model("Subscription", subscriptionSchema);
+module.exports = subscriptionModel;

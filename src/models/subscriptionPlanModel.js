@@ -12,7 +12,10 @@ const subscriptionPlanSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    description: String,
+    description: {
+        type: String,
+        required: true
+    },
 
     price: {
         type: Number,
@@ -25,23 +28,50 @@ const subscriptionPlanSchema = new mongoose.Schema({
         required: true
     },
 
-    // Limits
-    maxOrganizations: { type: Number, required: true },
-    maxVenues: { type: Number, required: true },
-    maxDevices: { type: Number, required: true },
+    // Plan Limits
+    maxOrganizations: {
+        type: Number,
+        required: true
+    },
+    maxVenues: {
+        type: Number,
+        required: true
+    },
+    maxDevices: {
+        type: Number,
+        required: true
+    },
 
     isActive: {
         type: Boolean,
         default: true
     },
+
     isTrial: {
         type: Boolean,
         default: false
     },
 
-    features: [String]   // e.g., ["real-time-monitoring", "advanced-alerts", "reports"]
+    features: [{
+        type: String
+    }], // e.g., "real-time-monitoring", "advanced-scheduling", "alerts", "reports"
+
+    recommended: {
+        type: Boolean,
+        default: false
+    }
+
 }, { 
     timestamps: true 
 });
 
-module.exports = mongoose.model("SubscriptionPlan", subscriptionPlanSchema);
+// Example: Free plan should be marked as trial
+subscriptionPlanSchema.pre('save', function(next) {
+    if (this.name === "free") {
+        this.isTrial = true;
+    }
+    next();
+});
+
+const subscriptionPlanModel = mongoose.model("SubscriptionPlan", subscriptionPlanSchema);
+module.exports = subscriptionPlanModel;

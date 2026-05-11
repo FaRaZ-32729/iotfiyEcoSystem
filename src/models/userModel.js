@@ -16,16 +16,22 @@ const userSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: true
+        required: false   // Will be set later if created by admin
     },
 
     role: {
         type: String,
         enum: ["admin", "manager", "user"],
-        default: "manager"           // Self-registered users start as manager
+        default: "manager"
     },
 
-    // Who created this user (for sub-users)
+    // ==================== CREATION METHOD ====================
+    createdBy: {
+        type: String,
+        enum: ["self", "admin"],
+        default: "self"
+    },
+
     creatorId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -63,35 +69,37 @@ const userSchema = new mongoose.Schema({
     },
 
     // ==================== ACCOUNT STATUS ====================
-    isActive: { 
-        type: Boolean, 
-        default: false 
+    isActive: {
+        type: Boolean,
+        default: false
     },
-    isVerified: { 
-        type: Boolean, 
-        default: false 
+    isVerified: {
+        type: Boolean,
+        default: false
     },
-    suspensionReason: String,
+    suspensionReason: {
+        type: String,
+        default: null
+    },
 
-    // ==================== AUTH FIELDS ====================
+    // ==================== AUTH TOKENS ====================
     otp: String,
     otpExpiry: Date,
-    setupToken: String,
+    setupToken: String,           // Used when admin creates user (set password link)
     resetToken: String,
     resetTokenExpiry: Date,
 
     lastLogin: Date,
 
-}, { 
-    timestamps: true 
+}, {
+    timestamps: true
 });
 
-// Indexes for better performance
+// Indexes
 userSchema.index({ email: 1 });
 userSchema.index({ role: 1 });
-userSchema.index({ currentSubscription: 1 });
-
+userSchema.index({ createdBy: 1 });
+userSchema.index({ creatorId: 1 });
 
 const userModel = mongoose.model("User", userSchema);
-
 module.exports = userModel;
