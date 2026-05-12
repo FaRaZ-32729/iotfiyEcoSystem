@@ -61,16 +61,15 @@ const subscriptionPlanSchema = new mongoose.Schema({
         default: false
     }
 
-}, { 
-    timestamps: true 
+}, {
+    timestamps: true
 });
 
-// Example: Free plan should be marked as trial
-subscriptionPlanSchema.pre('save', function(next) {
+subscriptionPlanSchema.pre('save', async function () {
     if (this.name === "free") {
         this.isTrial = true;
     }
-    next();
+    // No need to call next() in async middleware
 });
 
 const subscriptionPlanModel = mongoose.model("SubscriptionPlan", subscriptionPlanSchema);

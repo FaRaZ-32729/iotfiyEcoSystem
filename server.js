@@ -6,7 +6,7 @@ const cors = require("cors");
 const http = require("http");
 
 // Routers
-
+const centeralRoutes = require("./src/routers/centeralRoutes");
 
 // Utilities
 
@@ -42,10 +42,8 @@ app.use(cookieParser());
 
 
 // Routes
+app.use("/api", centeralRoutes)
 
-app.get("/", (req, res) => {
-    res.send("Hellow FaRaZ to IOTFIY-EcoSystem");
-});
 
 
 // console.log(new Date().toUTCString());

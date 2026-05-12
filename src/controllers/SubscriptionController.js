@@ -1,9 +1,9 @@
 // src/modules/subscription/subscription.controller.js
-const Subscription = require("../../models/subscriptionModel");
-const SubscriptionPlan = require("../../models/subscriptionPlanModel");
-const User = require("../../models/userModel");
-const { purchaseSubscriptionSchema } = require("../../validations/subscription.validation");
-const sendEmail = require("../../utils/sendEmail");
+const Subscription = require("../models/subscriptionModel");
+const SubscriptionPlan = require("../models/subscriptionPlanModel");
+const User = require("../models/userModel");
+const { purchaseSubscriptionSchema } = require("../validations/subscriptionValidations");
+const sendEmail = require("../services/emailServices");
 
 // Purchase / Activate Subscription
 const purchaseSubscription = async (req, res) => {

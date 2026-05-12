@@ -1,6 +1,6 @@
 // src/modules/subscription/subscriptionPlan.controller.js
-const SubscriptionPlan = require("../../models/subscriptionPlanModel");
-const { createPlanSchema } = require("../../validations/subscription.validation");
+const SubscriptionPlan = require("../models/subscriptionPlanModel");
+const { createPlanSchema } = require("../validations/subscriptionValidations");
 
 // Create New Plan (Admin Only)
 const createSubscriptionPlan = async (req, res) => {
