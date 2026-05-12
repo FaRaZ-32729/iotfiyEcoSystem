@@ -15,7 +15,6 @@ const registerSchema = z.object({
 const adminCreateUserSchema = z.object({
     name: z.string().min(2),
     email: z.string().email(),
-    role: z.enum(["manager", "user"]).default("user")
 });
 
 
@@ -48,18 +47,6 @@ const registerAdmin = async (req, res) => {
             isActive: true,
             isVerified: true   // Admin is auto-verified
         });
-
-        // Send welcome email to admin
-        await sendEmail(
-            admin.email,
-            "🎉 Welcome Admin - IoTify Dashboard",
-            `
-            <h2>Congratulations! You are now the Admin of IoTify.</h2>
-            <p><strong>Name:</strong> ${admin.name}</p>
-            <p><strong>Email:</strong> ${admin.email}</p>
-            <p>You have full access to the system.</p>
-            `
-        );
 
         res.status(201).json({
             success: true,
@@ -125,7 +112,13 @@ const registerUser = async (req, res) => {
 
     } catch (error) {
         if (error.name === "ZodError") {
-            return res.status(400).json({ message: error.errors });
+            return res.status(400).json({
+                success: false,
+                errors: error.issues.map((err) => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
+            });
         }
         res.status(500).json({ message: "Server error" });
     }
@@ -134,7 +127,7 @@ const registerUser = async (req, res) => {
 // Admin Creates User (Setup Password Flow)
 const createUserByAdmin = async (req, res) => {
     try {
-        const { name, email, role } = adminCreateUserSchema.parse(req.body);
+        const { name, email } = adminCreateUserSchema.parse(req.body);
         const admin = req.user;
 
         const existingUser = await User.findOne({ email });
@@ -145,7 +138,7 @@ const createUserByAdmin = async (req, res) => {
         const user = await User.create({
             name,
             email,
-            role,
+            role: "manager",
             creatorId: admin._id,
             createdBy: "admin",
             setupToken,
@@ -173,12 +166,25 @@ const createUserByAdmin = async (req, res) => {
         });
 
     } catch (error) {
-        if (error.name === "ZodError") return res.status(400).json({ message: error.errors });
+        console.error("=== FULL ERROR ===");
+        console.error(error);
+        console.error("Error Name:", error.name);
+        console.error("Error Message:", error.message);
+        if (error.name === "ZodError") {
+            return res.status(400).json({
+                success: false,
+                errors: error.issues.map((err) => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
+            });
+        }
         res.status(500).json({ message: "Server error" });
     }
 };
 
 // Set Password (for admin-created users)
+
 const setPassword = async (req, res) => {
     try {
         const { token } = req.params;

@@ -1,4 +1,3 @@
-// models/subscriptionPlanModel.js
 const mongoose = require("mongoose");
 
 const subscriptionPlanSchema = new mongoose.Schema({
@@ -8,13 +7,8 @@ const subscriptionPlanSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    displayName: {
-        type: String,
-        required: true
-    },
     description: {
         type: String,
-        required: true
     },
 
     price: {
@@ -50,17 +44,7 @@ const subscriptionPlanSchema = new mongoose.Schema({
     isTrial: {
         type: Boolean,
         default: false
-    },
-
-    features: [{
-        type: String
-    }], // e.g., "real-time-monitoring", "advanced-scheduling", "alerts", "reports"
-
-    recommended: {
-        type: Boolean,
-        default: false
     }
-
 }, {
     timestamps: true
 });
@@ -69,7 +53,6 @@ subscriptionPlanSchema.pre('save', async function () {
     if (this.name === "free") {
         this.isTrial = true;
     }
-    // No need to call next() in async middleware
 });
 
 const subscriptionPlanModel = mongoose.model("SubscriptionPlan", subscriptionPlanSchema);

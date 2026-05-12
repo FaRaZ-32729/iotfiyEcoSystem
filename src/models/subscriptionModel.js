@@ -1,4 +1,3 @@
-// models/subscriptionModel.js
 const mongoose = require("mongoose");
 
 const subscriptionSchema = new mongoose.Schema({
@@ -52,18 +51,15 @@ const subscriptionSchema = new mongoose.Schema({
         ref: "SubscriptionPlan"
     }
 
-}, { 
-    timestamps: true 
+}, {
+    timestamps: true
 });
 
-// Auto-update status if subscription is expired
-subscriptionSchema.pre('save', function (next) {
+subscriptionSchema.pre('save', async function () {
     const now = new Date();
     if (this.endDate < now && this.status === "active") {
         this.status = "expired";
     }
-    next();
 });
-
 const subscriptionModel = mongoose.model("Subscription", subscriptionSchema);
 module.exports = subscriptionModel;

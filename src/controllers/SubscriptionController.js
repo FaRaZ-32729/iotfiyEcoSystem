@@ -44,14 +44,28 @@ const purchaseSubscription = async (req, res) => {
         // Send Welcome / Subscription Activated Email
         await sendEmail(
             user.email,
-            "Subscription Activated - Welcome to IoTify!",
+            "🎉 Your IoTify Subscription is Now Active!",
             `
-            <h2>Subscription Activated Successfully!</h2>
-            <p>Dear ${user.name},</p>
-            <p>You have successfully subscribed to <strong>${plan.displayName}</strong> plan.</p>
-            <p>Valid until: ${endDate.toDateString()}</p>
-            <p>You can now create organizations, venues and devices.</p>
-            `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 30px 20px; background: #ffffff;">
+        <h1 style="color: #4F46E5; text-align: center;">Welcome to IoTify!</h1>
+        
+        <p style="font-size: 16px;">Dear <strong>${user.name}</strong>,</p>
+        
+        <p>Your subscription has been successfully activated. Thank you for trusting us with your IoT journey.</p>
+        
+        <div style="background: linear-gradient(135deg, #4F46E5, #6366F1); color: white; padding: 25px; border-radius: 12px; margin: 25px 0; text-align: center;">
+            <p style="margin: 0 0 8px 0; font-size: 18px;"><strong>${plan.name}</strong> Plan</p>
+            <p style="margin: 0; font-size: 15px;">Valid until: <strong>${endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></p>
+        </div>
+
+        <p>You can now create organizations, venues, and start adding your devices.</p>
+        
+        <p style="margin-top: 25px;">Need help getting started? Our support team is always here for you.</p>
+        
+        <br><br>
+        <p>Best Regards,<br><strong>The IoTify Team</strong></p>
+    </div>
+    `
         );
 
         res.status(201).json({
@@ -66,7 +80,13 @@ const purchaseSubscription = async (req, res) => {
 
     } catch (error) {
         if (error.name === "ZodError") {
-            return res.status(400).json({ message: error.errors });
+            return res.status(400).json({
+                success: false,
+                errors: error.issues.map((err) => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
+            });
         }
         console.error(error);
         res.status(500).json({ message: "Server error" });

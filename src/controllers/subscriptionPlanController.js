@@ -21,7 +21,13 @@ const createSubscriptionPlan = async (req, res) => {
         });
     } catch (error) {
         if (error.name === "ZodError") {
-            return res.status(400).json({ message: error.errors });
+            return res.status(400).json({
+                success: false,
+                errors: error.issues.map((err) => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
+            });
         }
         res.status(500).json({ message: "Server error", error: error.message });
     }
