@@ -3,9 +3,13 @@ const mongoose = require("mongoose");
 const subscriptionPlanSchema = new mongoose.Schema({
     name: {
         type: String,
-        enum: ["free", "basic", "premium", "custom"],
         required: true,
         unique: true
+    },
+    type: {
+        type: String,
+        required: true,
+        enum: ["free", "basic", "premium", "custom"],
     },
     description: {
         type: String,
@@ -44,6 +48,18 @@ const subscriptionPlanSchema = new mongoose.Schema({
     isTrial: {
         type: Boolean,
         default: false
+    },
+    isCustom: { type: Boolean, default: false },
+    assignedToEmail: {
+        type: String,
+        lowercase: true,
+        trim: true,
+        default: null
+    },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
     }
 }, {
     timestamps: true

@@ -85,7 +85,7 @@ const userSchema = new mongoose.Schema({
     // ==================== AUTH TOKENS ====================
     otp: String,
     otpExpiry: Date,
-    setupToken: String,           // Used when admin creates user (set password link)
+    setupToken: String,
     resetToken: String,
     resetTokenExpiry: Date,
 
@@ -96,7 +96,6 @@ const userSchema = new mongoose.Schema({
 });
 
 // Indexes
-userSchema.index({ email: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ createdBy: 1 });
 userSchema.index({ creatorId: 1 });

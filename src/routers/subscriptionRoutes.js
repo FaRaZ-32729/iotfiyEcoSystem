@@ -14,6 +14,6 @@ router.post("/purchase", authenticate, purchaseSubscription);
 router.get("/my-subscription", getMySubscription);
 
 // Admin Only
-router.post("/create-plan", createSubscriptionPlan);
+router.post("/create-plan", authenticate, createSubscriptionPlan);
 
 module.exports = router;
