@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../services/emailServices");
 const { z } = require("zod");
+require("dotenv").config();
 
 // Validation Schemas
 const registerSchema = z.object({
@@ -67,17 +68,23 @@ const registerAdmin = async (req, res) => {
 
 // Register Self (Normal User → becomes Manager)
 const registerUser = async (req, res) => {
+    let user = null;   // For rollback
+
     try {
         const { name, email, password } = registerSchema.parse(req.body);
 
         const existingUser = await User.findOne({ email });
         if (existingUser) {
-            return res.status(400).json({ message: "User already exists" });
+            return res.status(400).json({
+                success: false,
+                message: "User already exists"
+            });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const user = await User.create({
+        // Create user first
+        user = await User.create({
             name,
             email,
             password: hashedPassword,
@@ -93,52 +100,90 @@ const registerUser = async (req, res) => {
         user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
         await user.save();
 
-        // Send OTP Email
-        await sendEmail(
-            user.email,
-            "Verify Your IoTify Account",
-            `
-            <h2>Welcome to IoTify!</h2>
-            <p>Your OTP is: <strong>${otp}</strong></p>
-            <p>This OTP will expire in 10 minutes.</p>
-            `
-        );
+        // Try to send OTP Email
+        try {
+            await sendEmail(
+                user.email,
+                "Verify Your IoTify Account",
+                `
+                <h2>Welcome to IoTify!</h2>
+                <p>Hi <strong>${name}</strong>,</p>
+                <p>Your verification OTP is: <strong>${otp}</strong></p>
+                <p>This OTP will expire in 10 minutes.</p>
+                `
+            );
 
+            console.log(`OTP Email sent to ${user.email}`);
+
+        } catch (emailError) {
+            console.error("Email sending failed:", emailError.message);
+
+            if (user) {
+                await User.findByIdAndDelete(user._id);
+                console.log(`🗑️ User rolled back: ${user.email}`);
+            }
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to send verification email. Please try registering again."
+            });
+        }
+
+        // Success Response
         res.status(201).json({
             success: true,
             message: "Registration successful. Please verify OTP sent to your email.",
-            userId: user._id
+            userId: user._id,
+            email: user.email
         });
 
     } catch (error) {
+        console.error("Register User Error:", error);
+
+        if (user) {
+            await User.findByIdAndDelete(user._id);
+            console.log(`🗑️ User rolled back due to error: ${user.email}`);
+        }
+
         if (error.name === "ZodError") {
             return res.status(400).json({
                 success: false,
-                errors: error.issues.map((err) => ({
+                errors: error.issues.map(err => ({
                     field: err.path[0],
                     message: err.message
                 }))
             });
         }
-        res.status(500).json({ message: "Server error" });
+
+        res.status(500).json({
+            success: false,
+            message: "Server error during registration"
+        });
     }
 };
 
 // Admin Creates User (Setup Password Flow)
 const createUserByAdmin = async (req, res) => {
+    let user = null;   // For rollback
+
     try {
-        const { name, email } = adminCreateUserSchema.parse(req.body);
+        const { name, email, role = "manager" } = adminCreateUserSchema.parse(req.body);
         const admin = req.user;
 
         const existingUser = await User.findOne({ email });
-        if (existingUser) return res.status(400).json({ message: "User already exists" });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "User already exists" });
+        }
 
-        const setupToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1d" });
+        const setupToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "24h" });
 
-        const user = await User.create({
+        console.log(setupToken)
+
+        // Create user
+        user = await User.create({
             name,
             email,
-            role: "manager",
+            role,
             creatorId: admin._id,
             createdBy: "admin",
             setupToken,
@@ -148,28 +193,51 @@ const createUserByAdmin = async (req, res) => {
 
         const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
 
-        await sendEmail(
-            user.email,
-            "Set Your IoTify Account Password",
-            `
-            <h2>Account Created</h2>
-            <p>Hello ${name},</p>
-            <p>Your account has been created by Admin.</p>
-            <a href="${setupLink}" style="padding:12px 20px; background:#0055a5; color:white; text-decoration:none;">Set Password</a>
-            `
-        );
+        // Send Email
+        try {
+            await sendEmail(
+                user.email,
+                "Set Your IoTify Account Password",
+                `
+                <h2>Account Created Successfully</h2>
+                <p>Hello <strong>${name}</strong>,</p>
+                <p>Your account has been created by the administrator.</p>
+                <p>Please click the link below to set your password:</p>
+                <a href="${setupLink}" 
+                   style="background:#0055a5; color:white; padding:12px 24px; text-decoration:none; border-radius:6px;">
+                   Set Password
+                </a>
+                <p>This link will expire in 24 hours.</p>
+                `
+            );
+        } catch (emailError) {
+            console.error("Email sending failed:", emailError.message);
+            await User.findByIdAndDelete(user._id);
+            return res.status(500).json({
+                success: false,
+                message: "Failed to send setup email."
+            });
+        }
 
         res.status(201).json({
             success: true,
-            message: "User created. Setup link sent to email.",
-            user
+            message: "User created successfully. Setup link sent to email.",
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role
+            }
         });
 
     } catch (error) {
-        console.error("=== FULL ERROR ===");
-        console.error(error);
-        console.error("Error Name:", error.name);
-        console.error("Error Message:", error.message);
+        console.error("Create User By Admin Error:", error);
+
+        if (user) {
+            await User.findByIdAndDelete(user._id);
+            console.log(`User rolled back: ${user.email}`);
+        }
+
         if (error.name === "ZodError") {
             return res.status(400).json({
                 success: false,
@@ -179,12 +247,17 @@ const createUserByAdmin = async (req, res) => {
                 }))
             });
         }
-        res.status(500).json({ message: "Server error" });
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to create user. " + (error.message.includes("ETIMEDOUT")
+                ? "Email service is not responding."
+                : "Please try again.")
+        });
     }
 };
 
-// Set Password (for admin-created users)
-
+// set password for admin created users 
 const setPassword = async (req, res) => {
     try {
         const { token } = req.params;
@@ -268,8 +341,7 @@ const setPassword = async (req, res) => {
 // Verify OTP
 const verifyOTP = async (req, res) => {
     try {
-        const { otp } = req.body;           // OTP comes in body
-        const { token } = req.params;       // Optional: only for admin-created users
+        const { otp } = req.body;
 
         if (!otp) {
             return res.status(400).json({
@@ -278,47 +350,27 @@ const verifyOTP = async (req, res) => {
             });
         }
 
-        let user;
-
-        // Case 1: Admin-created user (has setupToken in URL)
-        if (token) {
-            try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                user = await User.findOne({
-                    email: decoded.email,
-                    setupToken: token
-                });
-            } catch (err) {
-                return res.status(400).json({ success: false, message: "Invalid or expired setup link" });
-            }
-        }
-        // Case 2: Normal self-registered user (most common)
-        else {
-            user = await User.findOne({ otp: otp });
-        }
+        const user = await User.findOne({ otp: otp });
 
         if (!user) {
-            return res.status(400).json({ success: false, message: "User not found" });
-        }
-
-        // Check OTP validity
-        if (user.otp !== otp) {
-            return res.status(400).json({ success: false, message: "Invalid OTP" });
+            return res.status(400).json({
+                success: false,
+                message: "Invalid OTP"
+            });
         }
 
         if (user.otpExpiry < Date.now()) {
-            return res.status(400).json({ success: false, message: "OTP has expired" });
+            return res.status(400).json({
+                success: false,
+                message: "OTP has expired"
+            });
         }
 
-        // Success - Verify user
+        // Verify and Activate User
         user.isVerified = true;
+        user.isActive = true
         user.otp = null;
         user.otpExpiry = null;
-
-        // Clear setupToken if it was used
-        if (token) {
-            user.setupToken = null;
-        }
 
         await user.save();
 
