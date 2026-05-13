@@ -11,13 +11,39 @@ const purchaseSubscription = async (req, res) => {
         const { planId } = purchaseSubscriptionSchema.parse(req.body);
         const userId = req.user._id;
 
+        // Fetch plan
         const plan = await SubscriptionPlan.findById(planId);
-        if (!plan) return res.status(404).json({ message: "Plan not found" });
 
+        if (!plan) {
+            return res.status(404).json({ success: false, message: "Plan not found" });
+        }
+
+        if (!plan.isActive) {
+            return res.status(400).json({ success: false, message: "This plan is currently inactive" });
+        }
+
+        // Fetch user
         const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ message: "User not found" });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
 
-        // Calculate end date
+        if (!user.isVerified) {
+            return res.status(403).json({ success: false, message: "Please verify your email first" });
+        }
+
+        // Optional: Prevent buying if already has active subscription (you can relax later)
+        if (user.currentSubscription) {
+            const activeSub = await Subscription.findById(user.currentSubscription);
+            if (activeSub && activeSub.status === "active") {
+                return res.status(400).json({
+                    success: false,
+                    message: "You already have an active subscription. Please cancel or upgrade later."
+                });
+            }
+        }
+
+        // Calculate dates
         const startDate = new Date();
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + plan.durationDays);
@@ -32,7 +58,7 @@ const purchaseSubscription = async (req, res) => {
             isTrial: plan.isTrial,
             paymentInfo: {
                 amountPaid: plan.price,
-                paymentMethod: "manual", // Change later with real payment gateway
+                paymentMethod: "manual",
             }
         });
 
@@ -41,39 +67,31 @@ const purchaseSubscription = async (req, res) => {
         user.isActive = true;
         await user.save();
 
-        // Send Welcome / Subscription Activated Email
+        // Send Email
         await sendEmail(
             user.email,
             "🎉 Your IoTify Subscription is Now Active!",
             `
-    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 30px 20px; background: #ffffff;">
-        <h1 style="color: #4F46E5; text-align: center;">Welcome to IoTify!</h1>
-        
-        <p style="font-size: 16px;">Dear <strong>${user.name}</strong>,</p>
-        
-        <p>Your subscription has been successfully activated. Thank you for trusting us with your IoT journey.</p>
-        
-        <div style="background: linear-gradient(135deg, #4F46E5, #6366F1); color: white; padding: 25px; border-radius: 12px; margin: 25px 0; text-align: center;">
-            <p style="margin: 0 0 8px 0; font-size: 18px;"><strong>${plan.name}</strong> Plan</p>
-            <p style="margin: 0; font-size: 15px;">Valid until: <strong>${endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></p>
-        </div>
-
-        <p>You can now create organizations, venues, and start adding your devices.</p>
-        
-        <p style="margin-top: 25px;">Need help getting started? Our support team is always here for you.</p>
-        
-        <br><br>
-        <p>Best Regards,<br><strong>The IoTify Team</strong></p>
-    </div>
-    `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #4F46E5;">Congratulations ${user.name}!</h2>
+                <p>Your <strong>${plan.name}</strong> plan has been activated successfully.</p>
+                <p>Valid until: <strong>${endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></p>
+                <p>You can now create organizations, venues, and devices.</p>
+            </div>
+            `
         );
 
         res.status(201).json({
             success: true,
             message: "Subscription activated successfully",
-            subscription,
+            subscription: {
+                id: subscription._id,
+                plan: plan.name,
+                startDate,
+                endDate
+            },
             user: {
-                isActive: user.isActive,
+                isActive: true,
                 currentSubscription: subscription._id
             }
         });
@@ -82,14 +100,15 @@ const purchaseSubscription = async (req, res) => {
         if (error.name === "ZodError") {
             return res.status(400).json({
                 success: false,
-                errors: error.issues.map((err) => ({
+                errors: error.issues.map(err => ({
                     field: err.path[0],
                     message: err.message
                 }))
             });
         }
-        console.error(error);
-        res.status(500).json({ message: "Server error" });
+
+        console.error("Purchase Subscription Error:", error);
+        res.status(500).json({ success: false, message: "Server error" });
     }
 };
 
