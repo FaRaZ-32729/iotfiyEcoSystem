@@ -3,10 +3,16 @@ const mongoose = require("mongoose");
 const subscriptionSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
+        ref: "User"
+    },
+    email: {
+        type: String,
         required: true
     },
-
+    isAdmin: {
+        type: Boolean,
+        default: false
+    },
     plan: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "SubscriptionPlan",

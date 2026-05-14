@@ -52,6 +52,7 @@ const purchaseSubscription = async (req, res) => {
         const subscription = await Subscription.create({
             user: userId,
             plan: planId,
+            email: req.user.email,
             startDate,
             endDate,
             status: "active",

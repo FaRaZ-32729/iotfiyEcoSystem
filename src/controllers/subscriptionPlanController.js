@@ -1,20 +1,21 @@
+const subscriptionModel = require("../models/subscriptionModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
+const User = require("../models/userModel");
 const { createPlanSchema } = require("../validations/subscriptionValidations");
 
-// Create New Plan (free , basic , premium , Admin Custom , User Custom) 
+// Create New Plan (free , basic , premium , Admin Custom , User Custom)
 const createSubscriptionPlan = async (req, res) => {
     try {
         const validatedData = createPlanSchema.parse(req.body);
 
         // Free plan must be 15 days
-        if (validatedData.name === "free" && validatedData.durationDays !== 15) {
+        if (validatedData.type === "free" && validatedData.durationDays !== 15) {
             return res.status(400).json({
                 success: false,
                 message: "Free plan must have exactly 15 days duration"
             });
         }
 
-        // Handle assignedToEmail logic
         let finalAssignedToEmail = validatedData.assignedToEmail;
 
         if (validatedData.type === "custom") {
@@ -22,7 +23,7 @@ const createSubscriptionPlan = async (req, res) => {
                 if (!finalAssignedToEmail) {
                     return res.status(400).json({
                         success: false,
-                        message: "assignedToEmail is required when admin creates custom plan"
+                        message: "Customer's email is required"
                     });
                 }
             } else {
@@ -30,7 +31,7 @@ const createSubscriptionPlan = async (req, res) => {
             }
         }
 
-        // Check duplicate
+        // Check duplicate plan name
         const existing = await SubscriptionPlan.findOne({ name: validatedData.name });
         if (existing) {
             return res.status(400).json({
@@ -39,7 +40,7 @@ const createSubscriptionPlan = async (req, res) => {
             });
         }
 
-        // Create Plan with Creator ID
+        // ==================== CREATE PLAN ====================
         const plan = await SubscriptionPlan.create({
             name: validatedData.name,
             type: validatedData.type,
@@ -50,15 +51,58 @@ const createSubscriptionPlan = async (req, res) => {
             maxVenues: validatedData.maxVenues,
             maxDevices: validatedData.maxDevices,
             assignedToEmail: finalAssignedToEmail,
-            isCustom: validatedData.name === "custom",
-            isTrial: validatedData.name === "free",
-            createdBy: req.user._id          // ← Important: Save who created it
+            isCustom: validatedData.type === "custom",
+            isTrial: validatedData.type === "free",
+            createdBy: req.user._id
         });
+
+        // ==================== AUTO CREATE SUBSCRIPTION ====================
+        // ONLY for Admin-created Custom Plans
+        let subscription = null;
+
+        if (validatedData.type === "custom" && req.user.role === "admin" && finalAssignedToEmail) {
+
+            const existingUser = await User.findOne({ email: finalAssignedToEmail });
+
+            const startDate = new Date();
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() + plan.durationDays);
+
+            subscription = await subscriptionModel.create({
+                user: existingUser ? existingUser._id : null,        // user id if exists
+                email: finalAssignedToEmail,
+                isAdmin: true,
+                plan: plan._id,
+                startDate,
+                endDate,
+                status: "active",
+                isTrial: false,
+                paymentInfo: {
+                    amountPaid: plan.price,
+                    paymentMethod: "admin-assigned",
+                },
+                assignedEmail: finalAssignedToEmail   // ← Always store email for future linking
+            });
+
+            // If user already exists → Activate them
+            if (existingUser) {
+                existingUser.currentSubscription = subscription._id;
+                existingUser.isActive = true;
+                await existingUser.save();
+            }
+        }
 
         res.status(201).json({
             success: true,
-            message: "Subscription Plan created successfully",
-            plan
+            message: "Subscription Plan created successfully" +
+                (subscription ? " and assigned to user" : ""),
+            plan,
+            subscription: subscription ? {
+                id: subscription._id,
+                assignedEmail: finalAssignedToEmail,
+                userId: subscription.user,
+                status: subscription.status
+            } : null
         });
 
     } catch (error) {
