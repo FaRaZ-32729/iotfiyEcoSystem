@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../services/emailServices");
 const { z } = require("zod");
+const Subscription = require("../models/subscriptionModel");
 require("dotenv").config();
 
 // Validation Schemas
@@ -100,6 +101,19 @@ const registerUser = async (req, res) => {
         user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
         await user.save();
 
+        // Check & Link Pending Subscription
+        if (req.pendingSubscription) {
+            user.currentSubscription = req.pendingSubscription._id;
+            await user.save();
+
+            // Update subscription with user ID
+            await Subscription.findByIdAndUpdate(req.pendingSubscription._id, {
+                user: user._id
+            });
+
+            console.log(`Pending subscription linked for ${email}`);
+        }
+
         // Try to send OTP Email
         try {
             await sendEmail(
@@ -190,6 +204,17 @@ const createUserByAdmin = async (req, res) => {
             isActive: false,
             isVerified: false
         });
+
+        if (req.pendingSubscription) {
+            user.currentSubscription = req.pendingSubscription._id;
+            await user.save();
+
+            await Subscription.findByIdAndUpdate(req.pendingSubscription._id, {
+                user: user._id
+            });
+
+            console.log(`Pending subscription linked for admin-created user: ${email}`);
+        }
 
         const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
 
@@ -434,11 +459,23 @@ const loginUser = async (req, res) => {
     }
 };
 
+// logout user 
+const logoutUser = async (req, res) => {
+    try {
+        res.clearCookie("token", { httpOnly: true, sameSite: "none", path: "/", secure: true });
+        res.status(200).json({ success: true, message: "Logged out successfully" });
+    } catch (error) {
+        console.error("Error in logout:", error);
+        res.status(500).json({ success: false, message: "Logout failed" });
+    }
+};
+
 module.exports = {
     registerUser,
     createUserByAdmin,
     setPassword,
     registerAdmin,
     verifyOTP,
-    loginUser
+    loginUser,
+    logoutUser
 };

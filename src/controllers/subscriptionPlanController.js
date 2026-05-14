@@ -87,7 +87,6 @@ const createSubscriptionPlan = async (req, res) => {
             // If user already exists → Activate them
             if (existingUser) {
                 existingUser.currentSubscription = subscription._id;
-                existingUser.isActive = true;
                 await existingUser.save();
             }
         }

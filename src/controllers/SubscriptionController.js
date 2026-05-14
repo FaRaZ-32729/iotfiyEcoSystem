@@ -65,7 +65,6 @@ const purchaseSubscription = async (req, res) => {
 
         // Update User
         user.currentSubscription = subscription._id;
-        user.isActive = true;
         await user.save();
 
         // Send Email
