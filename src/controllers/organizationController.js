@@ -2,20 +2,20 @@
 const Organization = require("../models/organizationModel");
 const { createOrganizationSchema } = require("../validations/organizationValidation");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
-const userModel = require("../models/userModel");
+const User = require("../models/userModel");
 
-// Create Organization
 const createOrganization = async (req, res) => {
     try {
         const validatedData = createOrganizationSchema.parse(req.body);
         const user = req.user;
 
-        // Check subscription limit (only for non-admin)
         if (user.role !== "admin") {
-            await checkSubscriptionLimit("organization")(req, res, () => { });
+            await checkSubscriptionLimit("organization")(req, res, () => {
+            });            
+            if (res.headersSent) return;
         }
 
-        // Check if organization name already exists
+        // Check duplicate organization name
         const existingOrg = await Organization.findOne({
             name: { $regex: new RegExp(`^${validatedData.name}$`, 'i') }
         });
@@ -31,11 +31,10 @@ const createOrganization = async (req, res) => {
         const organization = await Organization.create({
             name: validatedData.name,
             owner: user._id,
-            subscription: user.currentSubscription
         });
 
-        // Add organization to user's organizations array
-        await userModel.findByIdAndUpdate(user._id, {
+        // Add to user's organizations
+        await User.findByIdAndUpdate(user._id, {
             $push: { organizations: organization._id },
         });
 

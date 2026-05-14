@@ -5,10 +5,12 @@ const router = express.Router();
 // Import all module routes
 const authRoutes = require("./authRoutes")
 const subscriptionRoutes = require("./subscriptionRoutes")
+const organizationRoutes = require("./organizationRoutes")
 
 // Mount all routes with proper prefixes
 router.use("/auth", authRoutes);
 router.use("/subscription", subscriptionRoutes);
+router.use("/organization", organizationRoutes);
 
 // Health check route
 router.get("/health", (req, res) => {

@@ -425,7 +425,7 @@ const loginUser = async (req, res) => {
         if (!user) return res.status(404).json({ message: "User not found" });
 
         if (!user.isVerified) return res.status(403).json({ message: "Please verify your email first" });
-        // if (!user.isActive) return res.status(403).json({ message: "Account is not active" });
+        if (!user.isActive) return res.status(403).json({ message: "Account is not active" });
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
