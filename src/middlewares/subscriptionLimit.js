@@ -1,4 +1,5 @@
 // src/middleware/subscriptionLimit.js
+const Organization = require("../models/organizationModel");
 const User = require("../models/userModel");
 
 const checkSubscriptionLimit = (resourceType) => {
@@ -46,7 +47,15 @@ const checkSubscriptionLimit = (resourceType) => {
                 maxLimit = plan.maxOrganizations;
             }
             else if (resourceType === "venue") {
-                // You can implement venue count logic later
+
+                const orgIds = user.organizations || [];
+                currentCount = await Organization.aggregate([
+                    { $match: { _id: { $in: orgIds } } },
+                    { $lookup: { from: "venues", localField: "_id", foreignField: "organization", as: "venues" } },
+                    { $unwind: "$venues" },
+                    { $count: "total" }
+                ]).then(result => result[0]?.total || 0);
+
                 maxLimit = plan.maxVenues;
             }
             else if (resourceType === "device") {
