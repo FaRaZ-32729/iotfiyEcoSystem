@@ -3,6 +3,7 @@ const Venue = require("../models/venueModel");
 const Organization = require("../models/organizationModel");
 const { createVenueSchema } = require("../validations/venueValidation");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
+const User = require("../models/userModel");
 
 const createVenue = async (req, res) => {
     try {
@@ -53,6 +54,10 @@ const createVenue = async (req, res) => {
             description: validatedData.description,
             organization: validatedData.organization,
             createdBy: user._id
+        });
+
+        await User.findByIdAndUpdate(user._id, {
+            $push: { venues: venue._id },
         });
 
         res.status(201).json({

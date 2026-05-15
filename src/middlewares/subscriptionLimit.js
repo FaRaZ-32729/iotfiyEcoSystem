@@ -1,6 +1,8 @@
 // src/middleware/subscriptionLimit.js
+const Device = require("../models/deviceModel");
 const Organization = require("../models/organizationModel");
 const User = require("../models/userModel");
+const Venue = require("../models/venueModel");
 
 const checkSubscriptionLimit = (resourceType) => {
     return async (req, res, next) => {
@@ -59,7 +61,28 @@ const checkSubscriptionLimit = (resourceType) => {
                 maxLimit = plan.maxVenues;
             }
             else if (resourceType === "device") {
+                const orgIds = user.organizations || [];
+
+                // get venues under user's organizations
+                const venues = await Venue.find({
+                    organization: { $in: orgIds }
+                }).select("_id");
+
+                const venueIds = venues.map(v => v._id);
+
+                currentCount = await Device.countDocuments({
+                    venue: { $in: venueIds }
+                });
+
                 maxLimit = plan.maxDevices;
+
+            }
+            else if (resourceType === "user") {
+                currentCount = await User.countDocuments({
+                    organizations: { $in: user.organizations }
+                });
+
+                maxLimit = plan.maxUsers;
             }
 
             if (currentCount >= maxLimit) {

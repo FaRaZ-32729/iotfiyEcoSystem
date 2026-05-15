@@ -51,6 +51,7 @@ const createSubscriptionPlan = async (req, res) => {
             maxOrganizations: validatedData.maxOrganizations,
             maxVenues: validatedData.maxVenues,
             maxDevices: validatedData.maxDevices,
+            maxUsers: validatedData.maxUsers,
             assignedToEmail: finalAssignedToEmail,
             isCustom: validatedData.type === "custom",
             isTrial: validatedData.type === "free",

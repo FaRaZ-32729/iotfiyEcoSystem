@@ -11,7 +11,7 @@ const createOrganization = async (req, res) => {
 
         if (user.role !== "admin") {
             await checkSubscriptionLimit("organization")(req, res, () => {
-            });            
+            });
             if (res.headersSent) return;
         }
 
@@ -63,4 +63,85 @@ const createOrganization = async (req, res) => {
     }
 };
 
-module.exports = { createOrganization };
+// ==================== GET ALL ORGANIZATIONS ====================
+const getAllOrganizations = async (req, res) => {
+    try {
+        const organizations = await Organization.find()
+            .populate("owner", "name email role");
+
+        if (!organizations) {
+            return res.status(404).json({ success: false, message: "No Oragnizaiton Found" });
+        }
+        return res.status(200).json({
+            success: true,
+            count: organizations.length,
+            organizations
+        });
+    } catch (error) {
+        console.error("Get All Organizations Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while fetching organizations"
+        });
+    }
+};
+
+// ==================== GET ORGANIZATION BY OWNER ====================
+const getOrganizationsByOwner = async (req, res) => {
+    try {
+        const { ownerId } = req.params;
+
+        const organizations = await Organization.find({ owner: ownerId })
+            .populate("owner", "name email role");
+
+        if (organizations.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No organizations found for this owner"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            count: organizations.length,
+            organizations
+        });
+
+    } catch (error) {
+        console.error("Get Organizations By Owner Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+};
+
+// ==================== GET SINGLE ORGANIZATION ====================
+const getOrganizationById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const organization = await Organization.findById(id)
+            .populate("owner", "name email role");
+
+        if (!organization) {
+            return res.status(404).json({
+                success: false,
+                message: "Organization not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            organization
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+};
+
+module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById };

@@ -25,6 +25,8 @@ const createPlanSchema = z.object({
         .positive("Max devices must be greater than 0")
         .int(),
 
+    maxUsers: z.number().positive("Max users must be greater than 0").int(),
+
     // Optional: Only used when creating custom plan for a specific user
     assignedToEmail: z.string()
         .email("Invalid email format")
