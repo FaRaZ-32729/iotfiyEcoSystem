@@ -1,4 +1,4 @@
-// src/modules/venues/venue.controller.js
+// src/Controllers/venueController.js
 const Venue = require("../models/venueModel");
 const Organization = require("../models/organizationModel");
 const { createVenueSchema } = require("../validations/venueValidation");

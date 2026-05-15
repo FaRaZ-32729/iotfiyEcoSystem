@@ -1,4 +1,4 @@
-// src/modules/auth/auth.routes.js
+// src/modules/authRoutes.js
 const express = require("express");
 const { registerUser, loginUser, verifyOTP, setPassword, createUserByAdmin, registerAdmin, logoutUser } = require("../controllers/authController");
 const authenticate = require("../middlewares/auth");

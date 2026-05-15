@@ -1,4 +1,3 @@
-// src/modules/subscription/subscription.routes.js
 const express = require("express");
 const { createOrganization } = require("../controllers/organizationController");
 const authenticate = require("../middlewares/auth");

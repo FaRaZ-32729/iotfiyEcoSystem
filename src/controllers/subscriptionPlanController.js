@@ -1,3 +1,4 @@
+// src/controllers/subscriptionPlanController.js
 const subscriptionModel = require("../models/subscriptionModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
 const User = require("../models/userModel");

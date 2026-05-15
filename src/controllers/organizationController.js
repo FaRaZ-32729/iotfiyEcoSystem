@@ -1,4 +1,4 @@
-// src/modules/organizations/organization.controller.js
+// src/controllers/organizationController.js
 const Organization = require("../models/organizationModel");
 const { createOrganizationSchema } = require("../validations/organizationValidation");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");

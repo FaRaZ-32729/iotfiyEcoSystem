@@ -1,3 +1,4 @@
+// models/subscriptionPlanModel.js
 const mongoose = require("mongoose");
 
 const subscriptionPlanSchema = new mongoose.Schema({

@@ -1,4 +1,3 @@
-// src/validations/venue.validation.js
 const { z } = require("zod");
 
 const createVenueSchema = z.object({

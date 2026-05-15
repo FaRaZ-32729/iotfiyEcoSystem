@@ -1,4 +1,3 @@
-// src/modules/subscription/subscription.routes.js
 const express = require("express");
 const { getAllPlans, getPlanById, createSubscriptionPlan } = require("../controllers/subscriptionPlanController");
 const { purchaseSubscription, getMySubscription } = require("../controllers/SubscriptionController");
