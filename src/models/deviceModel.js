@@ -2,75 +2,34 @@
 const mongoose = require("mongoose");
 
 const conditionSchema = new mongoose.Schema({
-    type: {
-        type: String,
-        required: true,
-        enum: ["temperature", "humidity", "odour", "AQI", "gass", "voltage", "current"]
-    },
-    operator: {
-        type: String,
-        required: true,
-        enum: [">", "<", "="]
-    },
-    value: {
-        type: Number,
-        required: true
-    }
+    type: { type: String, required: true },
+    operator: { type: String, required: true },
+    value: { type: Number, required: true }
 });
 
 const deviceSchema = new mongoose.Schema({
-    deviceId: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true
-    },
+    deviceId: { type: String, required: true, unique: true, trim: true },
+    deviceName: { type: String, required: true, trim: true },
 
-    deviceName: {
-        type: String,
-        required: true,
-        trim: true
-    },
-
-    // ==================== NEW PROFESSIONAL DEVICE TYPE ====================
     deviceType: {
         type: String,
         required: true,
-        enum: [
-            "OD",      // Odour Device
-            "THD",     // Temperature & Humidity Device
-            "AQID",    // AQI Device
-            "GLD",     // Gas Leakage Device
-            "ED",      // Energy Device
-        ]
+        enum: ["OD", "THD", "AQID", "GLD", "ED", "TSD"]
     },
 
-    // New field for better categorization
     category: {
         type: String,
         required: true,
-        enum: [
-            "monitoring",           // Only monitoring
-            "scheduling",           // Scheduling + Monitoring
-            "trigger",              // Trigger based + Monitoring
-        ]
+        enum: ["monitoring", "scheduling", "trigger"]
     },
 
-    venue: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Venue",
-        required: true
-    },
+    venue: { type: mongoose.Schema.Types.ObjectId, ref: "Venue", required: true },
 
     conditions: [conditionSchema],
 
-    apiKey: {
-        type: String,
-        required: true,
-        unique: true
-    },
+    apiKey: { type: String, required: true, unique: true },
 
-    // Common sensor fields
+    // Common fields
     temperatureAlert: { type: Boolean, default: false },
     humidityAlert: { type: Boolean, default: false },
     espTemperature: { type: Number, default: null },
@@ -94,12 +53,39 @@ const deviceSchema = new mongoose.Schema({
 
     lastUpdateTime: { type: Date, default: null }
 
-}, {
-    timestamps: true
-});
+}, { timestamps: true });
 
-// Compound Index: deviceName must be unique per venue
+// Compound Index
 deviceSchema.index({ deviceName: 1, venue: 1 }, { unique: true });
+
+// ==================== PRE-SAVE MIDDLEWARE (Modern & Safe) ====================
+deviceSchema.pre('save', async function () {
+    const type = this.deviceType;
+
+    const allowedFields = {
+        "OD": ["odourAlert", "espOdour"],
+        "THD": [],
+        "AQID": ["aqiAlert", "espAQI"],
+        "GLD": ["glAlert", "espGL"],
+        "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent"],
+        "TSD": []
+    };
+
+    const keepFields = [
+        "deviceId", "deviceName", "deviceType", "category", "venue",
+        "conditions", "apiKey",
+        "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
+        "lastUpdateTime",
+        ...(allowedFields[type] || [])
+    ];
+
+    // Remove all unwanted fields
+    Object.keys(this.toObject()).forEach(key => {
+        if (!keepFields.includes(key) && !["_id", "createdAt", "updatedAt", "__v"].includes(key)) {
+            this.set(key, undefined);
+        }
+    });
+});
 
 const Device = mongoose.model("Device", deviceSchema);
 module.exports = Device;

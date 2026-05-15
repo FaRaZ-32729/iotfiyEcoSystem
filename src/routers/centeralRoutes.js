@@ -7,12 +7,14 @@ const authRoutes = require("./authRoutes")
 const subscriptionRoutes = require("./subscriptionRoutes")
 const organizationRoutes = require("./organizationRoutes")
 const venueRoutes = require("./venueRoutes")
+const deviceRoutes = require("./deviceRoutes")
 
 // Mount all routes with proper prefixes
 router.use("/auth", authRoutes);
 router.use("/subscription", subscriptionRoutes);
 router.use("/organization", organizationRoutes);
 router.use("/venue", venueRoutes);
+router.use("/device", deviceRoutes);
 
 // Health check route
 router.get("/health", (req, res) => {
