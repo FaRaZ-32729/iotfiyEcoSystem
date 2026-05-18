@@ -56,9 +56,9 @@ const createVenue = async (req, res) => {
             createdBy: user._id
         });
 
-        await User.findByIdAndUpdate(user._id, {
-            $push: { venues: venue._id },
-        });
+        // await User.findByIdAndUpdate(user._id, {
+        //     $push: { venues: venue._id },
+        // });
 
         res.status(201).json({
             success: true,
