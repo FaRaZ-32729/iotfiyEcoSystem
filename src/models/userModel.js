@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema({
     // ==================== CREATION METHOD ====================
     createdBy: {
         type: String,
-        enum: ["self", "admin"],
+        enum: ["self", "admin", "manager"],
         default: "self"
     },
 
@@ -79,6 +79,11 @@ const userSchema = new mongoose.Schema({
     },
     suspensionReason: {
         type: String,
+        default: null
+    },
+    permission: {
+        type: String,
+        // enum: ["view", "manage"],
         default: null
     },
 

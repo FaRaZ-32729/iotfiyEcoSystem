@@ -5,6 +5,9 @@ const jwt = require("jsonwebtoken");
 const sendEmail = require("../services/emailServices");
 const { z } = require("zod");
 const Subscription = require("../models/subscriptionModel");
+const Organization = require("../models/organizationModel");
+const Venue = require("../models/venueModel");
+const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 require("dotenv").config();
 
 // Validation Schemas
@@ -17,6 +20,16 @@ const registerSchema = z.object({
 const adminCreateUserSchema = z.object({
     name: z.string().min(2),
     email: z.string().email(),
+});
+
+const createSubUserSchema = z.object({
+    name: z.string().min(2),
+    email: z.string().email(),
+    role: z.literal("user"),
+    organizations: z.array(z.string()).min(1, "At least one organization is required"),
+    venues: z.array(z.string()).optional(), // Venue IDs
+    permission: z.enum(["view", "manage"]).default("view"),
+    timer: z.string().optional()
 });
 
 
@@ -282,6 +295,125 @@ const createUserByAdmin = async (req, res) => {
     }
 };
 
+const createSubUser = async (req, res) => {
+    let newUser = null;
+
+    try {
+        const validatedData = createSubUserSchema.parse(req.body);
+        const manager = req.user;
+
+        // Only managers can create sub-users
+        if (manager.role !== "manager") {
+            return res.status(403).json({ success: false, message: "Only managers can create sub-users" });
+        }
+
+        // Check subscription limit
+        await checkSubscriptionLimit("user")(req, res, () => { });
+        if (res.headersSent) return;
+
+        // Check if email already exists
+        const existingUser = await User.findOne({ email: validatedData.email });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "Email already exists" });
+        }
+
+        // Validate organizations belong to this manager
+        const validOrgs = await Organization.find({
+            _id: { $in: validatedData.organizations },
+            owner: manager._id
+        });
+
+        if (validOrgs.length !== validatedData.organizations.length) {
+            return res.status(403).json({
+                success: false,
+                message: "You can only assign organizations that you own"
+            });
+        }
+
+        // Validate venues (if provided)
+        let assignedVenues = [];
+        if (validatedData.venues && validatedData.venues.length > 0) {
+            const validVenues = await Venue.find({
+                _id: { $in: validatedData.venues },
+                organization: { $in: validatedData.organizations }
+            });
+
+            if (validVenues.length !== validatedData.venues.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: "One or more venues are invalid or not in selected organizations"
+                });
+            }
+
+            assignedVenues = validVenues.map(v => ({
+                venueId: v._id,
+                venueName: v.name
+            }));
+        }
+
+        // Create user
+        newUser = await User.create({
+            name: validatedData.name,
+            email: validatedData.email,
+            role: "user",
+            creatorId: manager._id,
+            createdBy: "manager",
+            organizations: validatedData.organizations,
+            venues: assignedVenues,
+            permission: validatedData.permission,
+            timer: validatedData.timer,
+            isActive: false,
+            isVerified: false
+        });
+
+        // Send setup email
+        const setupToken = jwt.sign({ email: newUser.email }, process.env.JWT_SECRET, { expiresIn: "24h" });
+        newUser.setupToken = setupToken;
+        await newUser.save();
+
+        // const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
+
+        // await sendEmail(
+        //     newUser.email,
+        //     "Your Account Has Been Created",
+        //     `
+        //     <h2>Account Created</h2>
+        //     <p>Hello ${newUser.name},</p>
+        //     <p>Your account has been created by ${manager.name}.</p>
+        //     <a href="${setupLink}">Set Your Password</a>
+        //     `
+        // );
+
+        res.status(201).json({
+            success: true,
+            message: "Sub-user created successfully. Setup link sent.",
+            user: {
+                id: newUser._id,
+                name: newUser.name,
+                email: newUser.email,
+                role: newUser.role,
+                permission: newUser.permission
+            }
+        });
+
+    } catch (error) {
+        if (newUser) await User.findByIdAndDelete(newUser._id);
+
+        if (error.name === "ZodError") {
+            return res.status(400).json({
+                success: false,
+                errors: error.issues.map(err => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
+            });
+        }
+
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
 // set password for admin created users 
 const setPassword = async (req, res) => {
     try {
@@ -477,5 +609,6 @@ module.exports = {
     registerAdmin,
     verifyOTP,
     loginUser,
-    logoutUser
+    logoutUser,
+    createSubUser
 };
