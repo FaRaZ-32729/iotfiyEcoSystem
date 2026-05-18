@@ -4,6 +4,25 @@ const Organization = require("../models/organizationModel");
 const Venue = require("../models/venueModel");
 const Device = require("../models/deviceModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
+const Subscription = require("../models/subscriptionModel");
+
+// src/validations/user.validation.js
+const { z } = require("zod");
+const sendEmail = require("../services/emailServices");
+
+const updateProfileSchema = z.object({
+    name: z.string().min(2).optional(),
+    email: z.string().email("Invalid email format").optional(),
+    password: z.string().min(8, "Password must be at least 8 characters").optional(),
+    timer: z.string().optional()
+}).refine(data => {
+    // At least one field must be provided
+    return Object.keys(data).length > 0;
+}, {
+    message: "At least one field (name, email, password, timer) is required"
+});
+
+module.exports = { updateProfileSchema };
 
 
 // ====================== GET ALL USERS (EXCEPT ADMIN) ======================
@@ -136,6 +155,7 @@ const getSingleUser = async (req, res) => {
     }
 };
 
+// this api is used to add or remove organization , venues , and update permission
 const updateManagerCreatedUser = async (req, res) => {
     try {
 
@@ -260,6 +280,7 @@ const updateManagerCreatedUser = async (req, res) => {
         });
     }
 };
+
 
 // update user status
 const suspendManager = async (req, res) => {
@@ -419,10 +440,15 @@ const deleteManager = async (req, res) => {
         });
 
         // ================= CUSTOM PLANS DELETE =================
-        // await SubscriptionPlan.deleteMany({
-        //     createdBy: manager._id,
-        //     isCustom: true
-        // });
+        await SubscriptionPlan.deleteMany({
+            assignedToEmail: manager.email,
+            isCustom: true
+        });
+
+        // ================= SUBSCRIPTIONS DELETE =================
+        await Subscription.deleteMany({
+            user: manager._id
+        });
 
         // ================= DELETE MANAGER =================
         await User.findByIdAndDelete(manager._id);
@@ -444,4 +470,112 @@ const deleteManager = async (req, res) => {
 };
 
 
-module.exports = { getSingleUser, suspendManager, getAllUsers, getAllManagers, getUsersByManager, deleteUser, deleteManager, updateManagerCreatedUser };
+// ==================== REQUEST EMAIL CHANGE ====================
+const requestEmailChange = async (req, res) => {
+    try {
+        const { newEmail } = req.body;
+        const user = req.user;
+
+        if (!newEmail) {
+            return res.status(400).json({ success: false, message: "New email is required" });
+        }
+
+        if (newEmail === user.email) {
+            return res.status(400).json({ success: false, message: "New email cannot be same as current" });
+        }
+
+        // Check if new email already exists
+        const existingUser = await User.findOne({ email: newEmail });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "Email already in use" });
+        }
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Save temporary email change request
+        user.tempEmail = newEmail;
+        user.emailChangeOtp = otp;
+        user.emailChangeOtpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+        await user.save();
+
+        // Send OTP to NEW email
+        await sendEmail(
+            newEmail,
+            "Verify Your New Email - IoTify",
+            `
+            <h2>Email Change Request</h2>
+            <p>Your OTP to change email is: <strong>${otp}</strong></p>
+            <p>This OTP will expire in 10 minutes.</p>
+            `
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "OTP sent to your new email. Please verify."
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== VERIFY EMAIL CHANGE ====================
+const verifyEmailChange = async (req, res) => {
+    try {
+        const { otp } = req.body;
+        const user = req.user;
+
+        if (!otp) {
+            return res.status(400).json({ success: false, message: "OTP is required" });
+        }
+
+        if (!user.tempEmail || !user.emailChangeOtp || user.emailChangeOtpExpiry < Date.now()) {
+            return res.status(400).json({ success: false, message: "No pending email change or OTP expired" });
+        }
+
+        if (user.emailChangeOtp !== otp) {
+            return res.status(400).json({ success: false, message: "Invalid OTP" });
+        }
+
+        const oldEmail = user.email;
+        const newEmail = user.tempEmail;
+
+        // Update User
+        user.email = newEmail;
+        user.tempEmail = null;
+        user.emailChangeOtp = null;
+        user.emailChangeOtpExpiry = null;
+        await user.save();
+
+        // Update Subscription
+        await Subscription.updateMany(
+            { email: oldEmail },
+            { email: newEmail }
+        );
+
+        // Update SubscriptionPlan
+        await SubscriptionPlan.updateMany(
+            { assignedToEmail: oldEmail },
+            { assignedToEmail: newEmail }
+        );
+
+        console.log(`Email updated successfully: ${oldEmail} → ${newEmail}`);
+
+        res.status(200).json({
+            success: true,
+            message: "Email updated successfully",
+            email: newEmail
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+
+
+
+module.exports = { getSingleUser, suspendManager, getAllUsers, getAllManagers, getUsersByManager, deleteUser, deleteManager, updateManagerCreatedUser, requestEmailChange, verifyEmailChange, };

@@ -93,8 +93,17 @@ const userSchema = new mongoose.Schema({
     setupToken: String,
     resetToken: String,
     resetTokenExpiry: Date,
-
     lastLogin: Date,
+
+
+    tempEmail: {
+        type: String,
+        lowercase: true,
+        trim: true,
+        default: null
+    },
+    emailChangeOtp: String,
+    emailChangeOtpExpiry: Date,
 
 }, {
     timestamps: true

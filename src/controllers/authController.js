@@ -602,6 +602,160 @@ const logoutUser = async (req, res) => {
     }
 };
 
+// ==================== FORGOT PASSWORD ====================
+const forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Generate reset token
+        const resetToken = jwt.sign(
+            { email: user.email },
+            process.env.JWT_SECRET,
+            { expiresIn: "15m" }
+        );
+
+        user.resetToken = resetToken;
+        user.resetTokenExpiry = Date.now() + 15 * 60 * 1000; // 15 minutes
+        await user.save();
+
+        const resetLink = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+        await sendEmail(
+            user.email,
+            "Reset Your IoTify Password",
+            `
+            <h2>Password Reset Request</h2>
+            <p>Hello ${user.name},</p>
+            <p>You requested to reset your password. Click the link below:</p>
+            <a href="${resetLink}" style="background:#0055a5; color:white; padding:12px 24px; text-decoration:none; border-radius:6px;">
+                Reset Password
+            </a>
+            <p>This link will expire in 15 minutes.</p>
+            <p>If you didn't request this, please ignore this email.</p>
+            `
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Password reset link sent to your email"
+        });
+
+    } catch (error) {
+        console.error("Forgot Password Error:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== RESET PASSWORD ====================
+const resetPassword = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        if (!token || !password) {
+            return res.status(400).json({ success: false, message: "Token and password are required" });
+        }
+
+        if (password.length < 8) {
+            return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
+        }
+
+        // Verify token
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.status(400).json({ success: false, message: "Invalid or expired reset link" });
+        }
+
+        const user = await User.findOne({
+            email: decoded.email,
+            resetToken: token,
+            resetTokenExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ success: false, message: "Invalid or expired reset link" });
+        }
+
+        // Update password
+        user.password = await bcrypt.hash(password, 10);
+        user.resetToken = null;
+        user.resetTokenExpiry = null;
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Password reset successfully. You can now login with new password."
+        });
+
+    } catch (error) {
+        console.error("Reset Password Error:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// verified user after login
+// const verifyMe = async (req, res) => {
+//     try {
+//         return res.status(200).json({
+//             success: true,
+//             user: req.user,
+//         });
+//     } catch (error) {
+//         console.error("Error While Verifing User", error);
+//         res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+// src/modules/auth/auth.controller.js
+
+const me = async (req, res) => {
+    try {
+        const user = req.user;
+
+        // Return only safe, necessary fields
+        const safeUser = {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            permission: user.permission,
+            isActive: user.isActive,
+            isVerified: user.isVerified,
+            timer: user.timer,
+            createdBy: user.createdBy,
+            lastLogin: user.lastLogin,
+            // Organizations & Venues (if needed)
+            organizations: user.organizations,
+            venues: user.venues,
+            // Subscription info
+            currentSubscription: user.currentSubscription
+        };
+
+        return res.status(200).json({
+            success: true,
+            user: safeUser
+        });
+
+    } catch (error) {
+        console.error("Error While Verifying User:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+};
+
 module.exports = {
     registerUser,
     createUserByAdmin,
@@ -610,5 +764,8 @@ module.exports = {
     verifyOTP,
     loginUser,
     logoutUser,
-    createSubUser
+    createSubUser,
+    forgotPassword,
+    resetPassword,
+    me
 };
