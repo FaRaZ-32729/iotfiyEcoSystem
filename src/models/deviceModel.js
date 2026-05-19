@@ -14,7 +14,7 @@ const deviceSchema = new mongoose.Schema({
     deviceType: {
         type: String,
         required: true,
-        enum: ["OD", "THD", "AQID", "GLD", "ED", "TSD"]
+        enum: ["OD", "THD", "AQID", "GLD", "ED"]
     },
 
     category: {
@@ -67,8 +67,7 @@ deviceSchema.pre('save', async function () {
         "THD": [],
         "AQID": ["aqiAlert", "espAQI"],
         "GLD": ["glAlert", "espGL"],
-        "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent"],
-        "TSD": []
+        "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent"]
     };
 
     const keepFields = [
@@ -85,6 +84,36 @@ deviceSchema.pre('save', async function () {
             this.set(key, undefined);
         }
     });
+});
+
+deviceSchema.set('toJSON', {
+    transform: function (doc, ret) {
+        const type = doc.deviceType;
+
+        const allowedFields = {
+            "OD": ["odourAlert", "espOdour"],
+            "THD": [],
+            "AQID": ["aqiAlert", "espAQI"],
+            "GLD": ["glAlert", "espGL"],
+            "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent"]
+        };
+
+        const keepFields = [
+            "deviceId", "deviceName", "deviceType", "category", "venue",
+            "conditions", "apiKey",
+            "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
+            "lastUpdateTime",
+            ...(allowedFields[type] || [])
+        ];
+
+        Object.keys(ret).forEach(key => {
+            if (!keepFields.includes(key) && !["_id", "createdAt", "updatedAt", "__v"].includes(key)) {
+                delete ret[key];
+            }
+        });
+
+        return ret;
+    }
 });
 
 const Device = mongoose.model("Device", deviceSchema);

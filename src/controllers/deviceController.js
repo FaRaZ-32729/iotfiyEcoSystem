@@ -2,7 +2,7 @@
 const Device = require("../models/deviceModel");
 const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
-const { createDeviceSchema } = require("../validations/deviceValidation");
+const { createDeviceSchema, updateDeviceSchema } = require("../validations/deviceValidation");
 
 // Helper function to generate API Key
 const generateApiKey = (deviceId) => {
@@ -185,15 +185,15 @@ const updateDevice = async (req, res) => {
         }
 
         // Permission Check
-        const venue = await Venue.findById(device.venue);
-        const org = await Organization.findById(venue.organization);
+        // const venue = await Venue.findById(device.venue);
+        // const org = await Organization.findById(venue.organization);
 
-        if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: "You don't have permission to update this device"
-            });
-        }
+        // if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
+        //     return res.status(403).json({
+        //         success: false,
+        //         message: "You don't have permission to update this device"
+        //     });
+        // }
 
         // If changing venue
         if (validatedData.venueId && validatedData.venueId !== device.venue.toString()) {
@@ -242,22 +242,10 @@ const updateDevice = async (req, res) => {
 const deleteDevice = async (req, res) => {
     try {
         const { id } = req.params;
-        const user = req.user;
 
         const device = await Device.findById(id);
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
-        }
-
-        // Permission Check
-        const venue = await Venue.findById(device.venue);
-        const org = await Organization.findById(venue.organization);
-
-        if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: "You don't have permission to delete this device"
-            });
         }
 
         await Device.findByIdAndDelete(id);
