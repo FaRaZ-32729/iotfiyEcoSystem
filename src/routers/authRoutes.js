@@ -6,7 +6,7 @@ const checkPendingSubscription = require("../middlewares/checkPendingSubscriptio
 const roleGuard = require("../middlewares/roleGuard");
 const router = express.Router();
 
-// Public Routes
+// Routes
 router.post("/register-admin", registerAdmin);
 router.post("/register", checkPendingSubscription, registerUser);
 router.post("/register-user", authenticate, roleGuard(["manager"]), createSubUser);

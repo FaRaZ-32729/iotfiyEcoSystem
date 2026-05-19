@@ -3,6 +3,8 @@ const Organization = require("../models/organizationModel");
 const { createOrganizationSchema } = require("../validations/organizationValidation");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const User = require("../models/userModel");
+const Venue = require("../models/venueModel");
+
 
 const createOrganization = async (req, res) => {
     try {
@@ -144,4 +146,109 @@ const getOrganizationById = async (req, res) => {
     }
 };
 
-module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById };
+// ====================== GET USER'S ORGANIZATIONS ======================
+const getUserOrganizations = async (req, res) => {
+    try {
+        const userId = req.params.userId || req.user._id;
+
+        // If a specific userId is provided, check permission
+        if (req.params.userId) {
+            if (req.user.role !== "admin" && req.params.userId !== req.user._id.toString()) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You can only view your own organizations"
+                });
+            }
+        }
+
+        const user = await User.findById(userId)
+            .populate({
+                path: "organizations",
+                select: "name description createdAt",
+                // populate: {
+                //     path: "owner",
+                //     select: "name email"
+                // }
+            });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            count: user.organizations.length,
+            organizations: user.organizations
+        });
+
+    } catch (error) {
+        console.error("Get User Organizations Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while fetching organizations"
+        });
+    }
+};
+
+// ====================== DELETE ORGANIZATION ======================
+// const deleteOrganization = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const user = req.user;
+
+//         // Find organization
+//         const organization = await Organization.findById(id);
+//         if (!organization) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Organization not found"
+//             });
+//         }
+
+//         // Permission Check: Only owner or admin can delete
+//         if (user.role !== "admin" && organization.owner.toString() !== user._id.toString()) {
+//             return res.status(403).json({
+//                 success: false,
+//                 message: "You don't have permission to delete this organization"
+//             });
+//         }
+
+//         // ==================== CASCADE DELETE ====================
+
+//         // 1. Find all venues in this organization
+//         const venues = await Venue.find({ organization: id });
+//         const venueIds = venues.map(v => v._id);
+
+//         // 2. Delete all devices in those venues
+//         await Device.deleteMany({ venue: { $in: venueIds } });
+
+//         // 3. Delete all venues
+//         await Venue.deleteMany({ organization: id });
+
+//         // 4. Remove this organization from ALL users who have it
+//         await User.updateMany(
+//             { organizations: id },
+//             { $pull: { organizations: id } }
+//         );
+
+//         // 5. Finally delete the organization
+//         await Organization.findByIdAndDelete(id);
+
+//         res.status(200).json({
+//             success: true,
+//             message: "Organization and all related venues & devices deleted successfully"
+//         });
+
+//     } catch (error) {
+//         console.error("Delete Organization Error:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Server error while deleting organization"
+//         });
+//     }
+// };
+
+module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations };
