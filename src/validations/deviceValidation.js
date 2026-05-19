@@ -28,42 +28,49 @@ const createDeviceSchema = z.object({
     category: z.enum(["monitoring", "scheduling", "trigger"]),
 
     conditions: z.array(conditionSchema)
-})
-    .superRefine((data, ctx) => {
+}).superRefine((data, ctx) => {
 
-        const requiredConditions = {
-            OD: ["temperature", "humidity", "odour"],
-            THD: ["temperature", "humidity"],
-            AQID: ["temperature", "humidity", "AQI"],
-            GLD: ["temperature", "humidity", "gass"],
-            ED: ["temperature", "humidity", "voltage", "current"]
-        };
+    const requiredConditions = {
+        OD: ["temperature", "humidity", "odour"],
+        THD: ["temperature", "humidity"],
+        AQID: ["temperature", "humidity", "AQI"],
+        GLD: ["temperature", "humidity", "gass"],
+        ED: ["temperature", "humidity", "voltage", "current"]
+    };
 
-        const allowed = requiredConditions[data.deviceType];
+    const allowed = requiredConditions[data.deviceType];
 
-        const providedTypes = data.conditions.map(c => c.type);
+    const providedTypes = data.conditions.map(c => c.type);
 
-        // Check missing conditions
-        for (const condition of allowed) {
-            if (!providedTypes.includes(condition)) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    path: ["conditions"],
-                    message: `${condition} condition is required for ${data.deviceType}`
-                });
-            }
+    // Check missing conditions
+    for (const condition of allowed) {
+        if (!providedTypes.includes(condition)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["conditions"],
+                message: `${condition} condition is required for ${data.deviceType}`
+            });
         }
+    }
 
-        // Check extra invalid conditions
-        for (const provided of providedTypes) {
-            if (!allowed.includes(provided)) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    path: ["conditions"],
-                    message: `${provided} is not allowed for ${data.deviceType}`
-                });
-            }
+    // Check extra invalid conditions
+    for (const provided of providedTypes) {
+        if (!allowed.includes(provided)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["conditions"],
+                message: `${provided} is not allowed for ${data.deviceType}`
+            });
         }
-    });
+    }
+});
 
-module.exports = { createDeviceSchema };
+const updateDeviceSchema = z.object({
+    deviceName: z.string().min(2).max(100).optional(),
+    venueId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Venue ID").optional(),
+    deviceType: z.enum(["OD", "THD", "AQID", "GLD", "ED"]).optional(),
+    category: z.enum(["monitoring", "scheduling", "trigger"]).optional(),
+    conditions: z.array(conditionSchema).optional()
+});
+
+module.exports = { createDeviceSchema, updateDeviceSchema };

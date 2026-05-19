@@ -4,6 +4,7 @@ const Organization = require("../models/organizationModel");
 const { createVenueSchema, updateVenueSchema } = require("../validations/venueValidation");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const User = require("../models/userModel");
+const Device = require("../models/deviceModel");
 
 // ==================== CREATE VENUE ====================
 const createVenue = async (req, res) => {
@@ -128,24 +129,6 @@ const getVenuesByOrganization = async (req, res) => {
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
-
-// ==================== GET DEVICES BY VENUE ====================
-// const getDevicesByVenue = async (req, res) => {
-//     try {
-//         const { venueId } = req.params;
-
-//         const devices = await Device.find({ venue: venueId })
-//             .populate("venue", "name");
-
-//         res.status(200).json({
-//             success: true,
-//             count: devices.length,
-//             devices
-//         });
-//     } catch (error) {
-//         res.status(500).json({ success: false, message: "Server error" });
-//     }
-// };
 
 // ==================== GET SINGLE VENUE ====================
 const getSingleVenue = async (req, res) => {
@@ -308,4 +291,4 @@ const deleteVenue = async (req, res) => {
     }
 };
 
-module.exports = { createVenue, getAllVenues, getVenuesByOrganization, getSingleVenue, updateVenue };
+module.exports = { createVenue, getAllVenues, getVenuesByOrganization, getSingleVenue, updateVenue, deleteVenue };

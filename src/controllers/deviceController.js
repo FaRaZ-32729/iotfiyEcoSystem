@@ -5,11 +5,11 @@ const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const { createDeviceSchema } = require("../validations/deviceValidation");
 
 // Helper function to generate API Key
-const generateApiKey = (deviceId, conditions) => {
+const generateApiKey = (deviceId) => {
     let rawString = deviceId;
-    conditions.forEach(cond => {
-        rawString += `|${cond.type}${cond.operator}${cond.value}`;
-    });
+    // conditions.forEach(cond => {
+    //     rawString += `|${cond.type}${cond.operator}${cond.value}`;
+    // });
     return Buffer.from(rawString).toString("base64");
 };
 
@@ -68,7 +68,7 @@ const createDevice = async (req, res) => {
         const deviceId = await generateDeviceId();
 
         // Generate API Key
-        const apiKey = generateApiKey(deviceId, validatedData.conditions);
+        const apiKey = generateApiKey(deviceId);
 
         // Create Device
         const device = await Device.create({
@@ -114,4 +114,163 @@ const createDevice = async (req, res) => {
     }
 };
 
-module.exports = { createDevice };
+// ==================== GET ALL DEVICES ====================
+const getAllDevices = async (req, res) => {
+    try {
+        const devices = await Device.find()
+            .populate("venue", "name")
+            .sort({ createdAt: -1 });
+
+        if (devices.length === 0) {
+            return res.status(404).json({ message: "No devices found" })
+        }
+        return res.status(200).json({
+            success: true,
+            count: devices.length,
+            devices
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== GET DEVICES BY VENUE ====================
+const getDevicesByVenue = async (req, res) => {
+    try {
+        const { venueId } = req.params;
+
+        const devices = await Device.find({ venue: venueId })
+            .populate("venue", "name");
+        if (devices.length === 0) {
+            return res.status(404).json({ message: "No devices under this venue" });
+        }
+
+        return res.status(200).json({
+            success: true,
+            count: devices.length,
+            devices
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== GET SINGLE DEVICE ====================
+const getSingleDevice = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const device = await Device.findById(id).populate("venue", "name");
+
+        if (!device) {
+            return res.status(404).json({ success: false, message: "Device not found" });
+        }
+
+        return res.status(200).json({ success: true, device });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== UPDATE DEVICE ====================
+const updateDevice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const validatedData = updateDeviceSchema.parse(req.body);
+        const user = req.user;
+
+        const device = await Device.findById(id);
+        if (!device) {
+            return res.status(404).json({ success: false, message: "Device not found" });
+        }
+
+        // Permission Check
+        const venue = await Venue.findById(device.venue);
+        const org = await Organization.findById(venue.organization);
+
+        if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to update this device"
+            });
+        }
+
+        // If changing venue
+        if (validatedData.venueId && validatedData.venueId !== device.venue.toString()) {
+            const newVenue = await Venue.findById(validatedData.venueId);
+            if (!newVenue) {
+                return res.status(404).json({ success: false, message: "New venue not found" });
+            }
+
+            const newOrg = await Organization.findById(newVenue.organization);
+            if (user.role !== "admin" && newOrg.owner.toString() !== user._id.toString()) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You don't have access to the new venue's organization"
+                });
+            }
+        }
+
+        // Update fields
+        if (validatedData.deviceName) device.deviceName = validatedData.deviceName;
+        if (validatedData.deviceType) device.deviceType = validatedData.deviceType;
+        if (validatedData.category) device.category = validatedData.category;
+        if (validatedData.venueId) device.venue = validatedData.venueId;
+        if (validatedData.conditions) device.conditions = validatedData.conditions;
+
+        await device.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Device updated successfully",
+            device
+        });
+
+    } catch (error) {
+        if (error.name === "ZodError") {
+            return res.status(400).json({
+                success: false,
+                errors: error.issues
+            });
+        }
+        console.error(error);
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== DELETE DEVICE ====================
+const deleteDevice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = req.user;
+
+        const device = await Device.findById(id);
+        if (!device) {
+            return res.status(404).json({ success: false, message: "Device not found" });
+        }
+
+        // Permission Check
+        const venue = await Venue.findById(device.venue);
+        const org = await Organization.findById(venue.organization);
+
+        if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to delete this device"
+            });
+        }
+
+        await Device.findByIdAndDelete(id);
+
+        return res.status(200).json({
+            success: true,
+            message: "Device deleted successfully"
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice };

@@ -4,6 +4,7 @@ const { createOrganizationSchema } = require("../validations/organizationValidat
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const User = require("../models/userModel");
 const Venue = require("../models/venueModel");
+const Device = require("../models/deviceModel");
 
 
 const createOrganization = async (req, res) => {
@@ -194,61 +195,61 @@ const getUserOrganizations = async (req, res) => {
 };
 
 // ====================== DELETE ORGANIZATION ======================
-// const deleteOrganization = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const user = req.user;
+const deleteOrganization = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = req.user;
 
-//         // Find organization
-//         const organization = await Organization.findById(id);
-//         if (!organization) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "Organization not found"
-//             });
-//         }
+        // Find organization
+        const organization = await Organization.findById(id);
+        if (!organization) {
+            return res.status(404).json({
+                success: false,
+                message: "Organization not found"
+            });
+        }
 
-//         // Permission Check: Only owner or admin can delete
-//         if (user.role !== "admin" && organization.owner.toString() !== user._id.toString()) {
-//             return res.status(403).json({
-//                 success: false,
-//                 message: "You don't have permission to delete this organization"
-//             });
-//         }
+        // Permission Check: Only owner or admin can delete
+        if (user.role !== "admin" && organization.owner.toString() !== user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to delete this organization"
+            });
+        }
 
-//         // ==================== CASCADE DELETE ====================
+        // ==================== CASCADE DELETE ====================
 
-//         // 1. Find all venues in this organization
-//         const venues = await Venue.find({ organization: id });
-//         const venueIds = venues.map(v => v._id);
+        // 1. Find all venues in this organization
+        const venues = await Venue.find({ organization: id });
+        const venueIds = venues.map(v => v._id);
 
-//         // 2. Delete all devices in those venues
-//         await Device.deleteMany({ venue: { $in: venueIds } });
+        // 2. Delete all devices in those venues
+        await Device.deleteMany({ venue: { $in: venueIds } });
 
-//         // 3. Delete all venues
-//         await Venue.deleteMany({ organization: id });
+        // 3. Delete all venues
+        await Venue.deleteMany({ organization: id });
 
-//         // 4. Remove this organization from ALL users who have it
-//         await User.updateMany(
-//             { organizations: id },
-//             { $pull: { organizations: id } }
-//         );
+        // 4. Remove this organization from ALL users who have it
+        await User.updateMany(
+            { organizations: id },
+            { $pull: { organizations: id } }
+        );
 
-//         // 5. Finally delete the organization
-//         await Organization.findByIdAndDelete(id);
+        // 5. Finally delete the organization
+        await Organization.findByIdAndDelete(id);
 
-//         res.status(200).json({
-//             success: true,
-//             message: "Organization and all related venues & devices deleted successfully"
-//         });
+        res.status(200).json({
+            success: true,
+            message: "Organization and all related venues & devices deleted successfully"
+        });
 
-//     } catch (error) {
-//         console.error("Delete Organization Error:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Server error while deleting organization"
-//         });
-//     }
-// };
+    } catch (error) {
+        console.error("Delete Organization Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while deleting organization"
+        });
+    }
+};
 
-module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations };
+module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations, deleteOrganization };

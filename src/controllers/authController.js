@@ -371,18 +371,18 @@ const createSubUser = async (req, res) => {
         newUser.setupToken = setupToken;
         await newUser.save();
 
-        // const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
+        const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
 
-        // await sendEmail(
-        //     newUser.email,
-        //     "Your Account Has Been Created",
-        //     `
-        //     <h2>Account Created</h2>
-        //     <p>Hello ${newUser.name},</p>
-        //     <p>Your account has been created by ${manager.name}.</p>
-        //     <a href="${setupLink}">Set Your Password</a>
-        //     `
-        // );
+        await sendEmail(
+            newUser.email,
+            "Your Account Has Been Created",
+            `
+            <h2>Account Created</h2>
+            <p>Hello ${newUser.name},</p>
+            <p>Your account has been created by ${manager.name}.</p>
+            <a href="${setupLink}">Set Your Password</a>
+            `
+        );
 
         res.status(201).json({
             success: true,
