@@ -17,7 +17,7 @@ const checkManagePermission = () => {
                 } else {
                     return res.status(403).json({
                         success: false,
-                        message: "You don't have permission to perform this action. Only 'manage' permission is allowed."
+                        message: "You don't have permission access this"
                     });
                 }
             }
