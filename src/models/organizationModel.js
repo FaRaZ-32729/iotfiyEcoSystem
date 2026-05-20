@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const organizationSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: true,
         trim: true,
         unique: true
     },
@@ -16,11 +15,11 @@ const organizationSchema = new mongoose.Schema({
         required: true
     },
 
-}, { 
-    timestamps: true 
+}, {
+    timestamps: true
 });
 
 // Index for faster search
-organizationSchema.index({ owner: 1 });
+organizationSchema.index({ owner: 1, name: 1 }, { unique: true });
 
 module.exports = mongoose.model("Organization", organizationSchema);

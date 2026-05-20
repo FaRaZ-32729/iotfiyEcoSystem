@@ -18,15 +18,16 @@ const createOrganization = async (req, res) => {
             if (res.headersSent) return;
         }
 
-        // Check duplicate organization name
+        // Check duplicate organization name for THIS user only
         const existingOrg = await Organization.findOne({
-            name: { $regex: new RegExp(`^${validatedData.name}$`, 'i') }
+            name: { $regex: new RegExp(`^${validatedData.name}$`, 'i') },
+            owner: user._id
         });
 
         if (existingOrg) {
             return res.status(400).json({
                 success: false,
-                message: "Organization with this name already exists"
+                message: "You already have an organization with this name"
             });
         }
 
@@ -190,6 +191,81 @@ const getUserOrganizations = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Server error while fetching organizations"
+        });
+    }
+};
+
+const updateOrganization = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name } = req.body;   // Only allowing name change
+        const user = req.user;
+
+        if (!name || name.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Organization name is required"
+            });
+        }
+
+        // Find organization
+        const organization = await Organization.findById(id);
+        if (!organization) {
+            return res.status(404).json({
+                success: false,
+                message: "Organization not found"
+            });
+        }
+
+        // Permission Check: Only owner or admin
+        if (user.role !== "admin" && organization.owner.toString() !== user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to update this organization"
+            });
+        }
+
+        // Check if new name is same as old name
+        if (name.trim().toLowerCase() === organization.name.toLowerCase()) {
+            return res.status(400).json({
+                success: false,
+                message: "New name is same as current name"
+            });
+        }
+
+        // Check duplicate name for this owner
+        const existingOrg = await Organization.findOne({
+            name: { $regex: new RegExp(`^${name}$`, 'i') },
+            owner: organization.owner,
+            _id: { $ne: id }
+        });
+
+        if (existingOrg) {
+            return res.status(400).json({
+                success: false,
+                message: "You already have an organization with this name"
+            });
+        }
+
+        // Update name
+        organization.name = name.trim();
+        await organization.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Organization name updated successfully",
+            organization: {
+                id: organization._id,
+                name: organization.name,
+                owner: organization.owner
+            }
+        });
+
+    } catch (error) {
+        console.error("Update Organization Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while updating organization"
         });
     }
 };
