@@ -77,6 +77,7 @@
 
 
 // src/validations/deviceValidation.js
+
 const { z } = require("zod");
 
 const conditionSchema = z.object({
@@ -90,7 +91,8 @@ const createDeviceSchema = z.object({
     venueId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Venue ID"),
     deviceType: z.enum(["OD", "THD", "AQID", "GLD", "ED"]),
     category: z.enum(["monitoring", "scheduling", "trigger"]),
-    conditions: z.array(conditionSchema)
+    conditions: z.array(conditionSchema),
+    interval: z.number().min(1).optional()
 }).superRefine((data, ctx) => {
     validateDeviceConditions(data, ctx);
 });
@@ -101,7 +103,8 @@ const updateDeviceSchema = z.object({
     venueId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Venue ID").optional(),
     deviceType: z.enum(["OD", "THD", "AQID", "GLD", "ED"]).optional(),
     category: z.enum(["monitoring", "scheduling", "trigger"]).optional(),
-    conditions: z.array(conditionSchema).optional()
+    conditions: z.array(conditionSchema).optional(),
+    interval: z.number().min(1).optional()
 }).superRefine((data, ctx) => {
     // Only validate conditions if deviceType OR conditions are being updated
     if (data.deviceType || data.conditions) {

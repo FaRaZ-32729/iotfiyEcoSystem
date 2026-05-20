@@ -23,6 +23,8 @@ const deviceSchema = new mongoose.Schema({
         enum: ["monitoring", "scheduling", "trigger"]
     },
 
+    interval: { type: Number, default: 5, min: 1 },
+
     venue: { type: mongoose.Schema.Types.ObjectId, ref: "Venue", required: true },
 
     conditions: [conditionSchema],
@@ -61,6 +63,7 @@ deviceSchema.index({ deviceName: 1, venue: 1 }, { unique: true });
 // ==================== PRE-SAVE MIDDLEWARE (Modern & Safe) ====================
 deviceSchema.pre('save', async function () {
     const type = this.deviceType;
+    const category = this.category;
 
     const allowedFields = {
         "OD": ["odourAlert", "espOdour"],
@@ -78,6 +81,10 @@ deviceSchema.pre('save', async function () {
         ...(allowedFields[type] || [])
     ];
 
+    if (category === "trigger") {
+        keepFields.push("interval");
+    }
+
     // Remove all unwanted fields
     Object.keys(this.toObject()).forEach(key => {
         if (!keepFields.includes(key) && !["_id", "createdAt", "updatedAt", "__v"].includes(key)) {
@@ -89,6 +96,7 @@ deviceSchema.pre('save', async function () {
 deviceSchema.set('toJSON', {
     transform: function (doc, ret) {
         const type = doc.deviceType;
+        const category = this.category;
 
         const allowedFields = {
             "OD": ["odourAlert", "espOdour"],
@@ -105,6 +113,10 @@ deviceSchema.set('toJSON', {
             "lastUpdateTime",
             ...(allowedFields[type] || [])
         ];
+
+        if (category === "trigger") {
+            keepFields.push("interval");
+        }
 
         Object.keys(ret).forEach(key => {
             if (!keepFields.includes(key) && !["_id", "createdAt", "updatedAt", "__v"].includes(key)) {
