@@ -1026,3 +1026,851 @@ custom
 ```
 
 ---
+
+# Organization APIs Documentation
+
+---
+
+# 1. Create Organization
+
+## Endpoint
+POST /api/organization/create
+
+## Authentication
+Required ✅
+
+## Allowed Roles
+- Admin
+- Manager
+
+## Dependencies
+- User must be logged in
+- Valid JWT token required
+- Managers must have available organization limit in subscription
+- Organization name must be unique for that owner
+
+## Request Payload
+
+```json
+{
+  "name": "Tech Organization"
+}
+```
+
+## Required Fields
+
+| Field | Type | Required |
+|------|------|------|
+| name | String | ✅ Yes |
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "message": "Organization created successfully",
+  "organization": {
+    "_id": "689abc123",
+    "name": "Tech Organization",
+    "owner": "688xyz123"
+  }
+}
+```
+
+## Error Responses
+
+```json
+{
+  "success": false,
+  "message": "You already have an organization with this name"
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "Organization limit reached"
+}
+```
+
+---
+
+# 2. Get All Organizations
+
+## Endpoint
+GET /api/organization/all
+
+## Authentication
+Not Required ❌
+
+## Dependencies
+None
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "organizations": [
+    {
+      "_id": "123",
+      "name": "Tech Organization",
+      "owner": {
+        "_id": "456",
+        "name": "Faraz",
+        "email": "faraz@gmail.com",
+        "role": "manager"
+      }
+    }
+  ]
+}
+```
+
+## Error Response
+
+```json
+{
+  "success": false,
+  "message": "No Oragnizaiton Found"
+}
+```
+
+---
+
+# 3. Get Organizations By Owner
+
+## Endpoint
+GET /api/organization/owner/:ownerId
+
+## Authentication
+Not Required ❌
+
+## URL Params
+
+| Param | Description |
+|------|------|
+| ownerId | Organization owner's user ID |
+
+## Dependencies
+- Owner ID must exist
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "organizations": [
+    {
+      "_id": "123",
+      "name": "Tech Organization"
+    }
+  ]
+}
+```
+
+## Error Response
+
+```json
+{
+  "success": false,
+  "message": "No organizations found for this owner"
+}
+```
+
+---
+
+# 4. Get Single Organization
+
+## Endpoint
+GET /api/organization/single/:id
+
+## Authentication
+Not Required ❌
+
+## URL Params
+
+| Param | Description |
+|------|------|
+| id | Organization ID |
+
+## Dependencies
+- Organization must exist
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "organization": {
+    "_id": "123",
+    "name": "Tech Organization",
+    "owner": {
+      "_id": "456",
+      "name": "Faraz",
+      "email": "faraz@gmail.com"
+    }
+  }
+}
+```
+
+## Error Response
+
+```json
+{
+  "success": false,
+  "message": "Organization not found"
+}
+```
+
+---
+
+# 5. Get My Organizations
+
+## Endpoint
+GET /api/organization/my-organizations
+
+## Authentication
+Required ✅
+
+## Dependencies
+- User must be logged in
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "organizations": [
+    {
+      "_id": "123",
+      "name": "Tech Organization",
+      "createdAt": "2026-05-21T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+## Error Response
+
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+
+---
+
+# 6. Delete Organization
+
+## Endpoint
+DELETE /api/organization/delete-org/:id
+
+## Authentication
+Required ✅
+
+## Allowed Roles
+- Admin
+- Organization Owner
+
+## URL Params
+
+| Param | Description |
+|------|------|
+| id | Organization ID |
+
+## Dependencies
+- User must be logged in
+- Organization must exist
+- Only admin or organization owner can delete
+
+## Important Note
+This API also deletes:
+- All venues inside the organization
+- All devices inside those venues
+- Removes organization from assigned users
+
+## Success Response
+
+```json
+{
+  "success": true,
+  "message": "Organization and all related venues & devices deleted successfully"
+}
+```
+
+## Error Responses
+
+```json
+{
+  "success": false,
+  "message": "Organization not found"
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "You don't have permission to delete this organization"
+}
+```
+
+# 🏟️ Venue APIs Documentation
+
+---
+
+# 1. Create Venue
+
+## Endpoint
+POST /api/venue/create
+
+## Authentication
+Required ✅
+
+## Allowed Roles
+- Admin
+- Manager
+
+## Dependencies
+- User must be logged in
+- Valid JWT token required
+- Organization must exist
+- Manager must belong to organization
+- Subscription limit check (for non-admin users)
+- Venue name must be unique within organization
+
+---
+
+## Request Payload
+
+```json
+{
+  "name": "Main Hall",
+  "organization": "64f1c2a9b9a7c8d9e1234567"
+}
+
+| Field        | Type              | Required |
+| ------------ | ----------------- | -------- |
+| name         | String            | ✅ Yes    |
+| organization | String (ObjectId) | ✅ Yes    |
+
+
+Success Response
+{
+  "success": true,
+  "message": "Venue created successfully",
+  "venue": {
+    "_id": "123",
+    "name": "Main Hall",
+    "organization": "456",
+    "createdAt": "2026-05-21T10:00:00.000Z",
+    "updatedAt": "2026-05-21T10:00:00.000Z"
+  }
+}
+
+Error Responses
+
+{
+  "success": false,
+  "message": "Organization not found"
+}
+{
+  "success": false,
+  "message": "You can only create venues in your own organizations"
+}
+{
+  "success": false,
+  "message": "Venue with this name already exists in this organization"
+}
+{
+  "success": false,
+  "message": "Organization limit reached"
+}
+
+2. Get All Venues
+Endpoint
+
+GET /api/venue/all
+
+Authentication
+
+Not Required ❌
+
+Dependencies
+
+None
+
+Success Response
+{
+  "success": true,
+  "count": 2,
+  "venues": [
+    {
+      "_id": "123",
+      "name": "Main Hall",
+      "organization": {
+        "_id": "456",
+        "name": "Tech Organization"
+      }
+    }
+  ]
+}
+Error Response
+{
+  "success": false,
+  "message": "Venues not found"
+}
+
+# 3. Get Venue By Organization
+
+Endpoint
+
+GET /api/venue/get-by-org/:organizationId
+
+Authentication
+
+Not Required ❌
+
+URL Params
+Param	Description
+organizationId	Organization ID
+Success Response
+{
+  "success": true,
+  "count": 2,
+  "venues": [
+    {
+      "_id": "123",
+      "name": "Main Hall",
+      "organization": {
+        "_id": "456",
+        "name": "Tech Organization"
+      }
+    }
+  ]
+}
+Error Response
+{
+  "success": false,
+  "message": "No venue found under this organization"
+}
+
+4. Get Single Venue
+
+Endpoint
+GET /api/venue/single/:id
+
+Authentication
+Not Required ❌
+
+
+Success Response
+{
+  "success": true,
+  "venue": {
+    "_id": "123",
+    "name": "Main Hall",
+    "organization": {
+      "_id": "456",
+      "name": "Tech Organization"
+    }
+  }
+}
+Error Response
+{
+  "success": false,
+  "message": "Venue not found"
+}
+5. Update Venue
+
+Endpoint
+PUT /api/venue/update/:id
+
+Authentication
+Required 
+
+Dependencies
+User must be logged in
+Venue must exist
+User must have permission (admin or organization owner)
+Name must be unique in organization
+
+Request Payload
+{
+  "name": "Updated Hall",
+  "description": "Large event hall",
+  "organization": "64f1c2a9b9a7c8d9e1234567"
+}
+
+Optional Fields
+Field	Type
+name	String
+description	String
+organization	String (ObjectId)
+
+Success Response
+{
+  "success": true,
+  "message": "Venue updated successfully",
+  "venue": {
+    "_id": "123",
+    "name": "Updated Hall"
+  }
+}
+Error Responses
+{
+  "success": false,
+  "message": "Venue not found"
+}
+{
+  "success": false,
+  "message": "A venue with this name already exists in this organization"
+}
+{
+  "success": false,
+  "message": "You don't have access to the new organization"
+}
+
+6. Delete Venue
+
+Endpoint
+DELETE /api/venue/delete-venue/:id
+
+Authentication
+Required 
+
+Allowed Roles
+Admin
+Organization Owner
+Dependencies
+Venue must exist
+Organization must exist
+User must be admin or owner
+⚠️ Cascade Delete Behavior
+
+When a venue is deleted:
+
+All devices inside venue are deleted
+Venue is removed from all users
+Venue is permanently deleted
+Success Response
+{
+  "success": true,
+  "message": "Venue and all its devices deleted successfully. References removed from all users."
+}
+Error Responses
+{
+  "success": false,
+  "message": "Venue not found"
+}
+{
+  "success": false,
+  "message": "You don't have permission to delete this venue"
+}
+
+---
+
+
+# 📟 Device APIs Documentation
+
+---
+
+# 1. Create Device
+
+## Endpoint
+POST /api/device/create
+
+## Authentication
+Required ✅
+
+## Allowed Roles
+- Admin
+- Manager
+
+## Dependencies
+- User must be logged in
+- Valid JWT token required
+- Venue must exist
+- Manager must belong to organization of the venue
+- Subscription limit check (for non-admin users)
+- Device name must be unique within a venue
+- Valid deviceType and category required
+- Conditions must match deviceType rules
+
+---
+
+## Request Payload
+
+```json
+{
+  "deviceName": "Temperature Sensor 1",
+  "venueId": "64f1c2a9b9a7c8d9e1234567",
+  "deviceType": "THD",
+  "category": "monitoring",
+  "conditions": [
+    {
+      "type": "temperature",
+      "operator": ">",
+      "value": 30
+    },
+    {
+      "type": "humidity",
+      "operator": "<",
+      "value": 70
+    }
+  ],
+}
+
+Required Fields
+Field	Type	Required
+deviceName	String	✅ Yes
+venueId	String (ObjectId)	✅ Yes
+deviceType	Enum (OD, THD, AQID, GLD, ED)	✅ Yes
+category	Enum (monitoring, scheduling, trigger)	✅ Yes
+conditions	Array	✅ Yes
+Device Type Rules (Conditions)
+Device Type	Required Conditions
+OD	temperature, humidity, odour
+THD	temperature, humidity
+AQID	temperature, humidity, AQI
+GLD	temperature, humidity, gass
+ED	temperature, humidity, voltage, current
+
+Success Response
+{
+  "success": true,
+  "message": "Device created successfully",
+  "device": {
+    "id": "123",
+    "deviceId": "A1B2C3",
+    "deviceName": "Temperature Sensor 1",
+    "deviceType": "THD",
+    "category": "monitoring",
+    "apiKey": "QUJDMTIz"
+  }
+}
+
+Error Responses
+{
+  "success": false,
+  "message": "Venue not found"
+}
+{
+  "success": false,
+  "message": "Device name already exists in this venue"
+}
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "conditions",
+      "message": "temperature condition is required for THD"
+    }
+  ]
+}
+
+2. Get All Devices
+
+Endpoint
+GET /api/device/all
+
+Authentication
+Not Required 
+
+Dependencies
+None
+
+Success Response
+{
+  "success": true,
+  "count": 2,
+  "devices": [
+    {
+      "_id": "123",
+      "deviceId": "A1B2C3",
+      "deviceName": "Sensor 1",
+      "deviceType": "THD",
+      "category": "monitoring",
+      "venue": {
+        "_id": "456",
+        "name": "Main Hall"
+      }
+    }
+  ]
+}
+
+Error Response
+{
+  "message": "No devices found"
+}
+
+3. Get Devices By Venue
+
+Endpoint
+GET /api/device/get-by-venue/:venueId
+
+Authentication
+Not Required 
+
+
+Success Response
+{
+  "success": true,
+  "count": 2,
+  "devices": [
+    {
+      "_id": "123",
+      "deviceId": "A1B2C3",
+      "deviceName": "Sensor 1",
+      "venue": {
+        "_id": "456",
+        "name": "Main Hall"
+      }
+    }
+  ]
+}
+
+Error Response
+{
+  "message": "No devices under this venue"
+}
+
+4. Get Single Device
+
+Endpoint
+GET /api/device/single/:id
+
+Authentication
+Not Required 
+
+URL Params
+Param	Description
+id	Device ID
+
+Success Response
+{
+  "success": true,
+  "device": {
+    "_id": "123",
+    "deviceId": "A1B2C3",
+    "deviceName": "Sensor 1",
+    "deviceType": "THD",
+    "category": "monitoring",
+    "venue": {
+      "_id": "456",
+      "name": "Main Hall"
+    }
+  }
+}
+
+Error Response
+{
+  "success": false,
+  "message": "Device not found"
+}
+
+5. Update Device
+
+Endpoint
+PUT /api/device/update/:id
+
+Authentication
+
+Required ⚠️ (permission logic partially implemented)
+
+Dependencies
+Device must exist
+If venue is changed → new venue must exist
+Conditions must match device rules
+Only admin or organization owner (intended logic)
+
+Request Payload
+{
+  "deviceName": "Updated Sensor",
+  "venueId": "64f1c2a9b9a7c8d9e1234567",
+  "deviceType": "THD",
+  "category": "monitoring",
+  "conditions": [
+    {
+      "type": "temperature",
+      "operator": ">",
+      "value": 35
+    },
+    {
+      "type": "humidity",
+      "operator": "<",
+      "value": 60
+    }
+  ]
+}
+
+Optional Fields
+Field	Type
+deviceName	String
+venueId	String (ObjectId)
+deviceType	Enum
+category	Enum
+conditions	Array
+
+Success Response
+{
+  "success": true,
+  "message": "Device updated successfully",
+  "device": {
+    "_id": "123",
+    "deviceName": "Updated Sensor"
+  }
+}
+
+Error Responses
+{
+  "success": false,
+  "message": "Device not found"
+}
+{
+  "success": false,
+  "message": "New venue not found"
+}
+{
+  "success": false,
+  "errors": [
+    {
+      "field": "conditions",
+      "message": "AQI condition is required for AQID"
+    }
+  ]
+}
+
+6. Delete Device
+
+Endpoint
+DELETE /api/device/delete/:id
+
+Authentication
+Required 
+
+Dependencies
+Device must exist
+Admin or owner permission intended
+
+Success Response
+{
+  "success": true,
+  "message": "Device deleted successfully"
+}
+Error Response
+{
+  "success": false,
+  "message": "Device not found"
+}
+
+📌 Notes
+deviceId is auto-generated (6-character unique ID)
+apiKey is base64 encoded from deviceId
+Device names are unique per venue (case-insensitive)
+Conditions validation depends on deviceType
+Pre-save middleware removes irrelevant fields based on device type
