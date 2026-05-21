@@ -2,6 +2,7 @@ const express = require("express");
 const dotenv = require("dotenv");
 const dbConnection = require("./src/config/dbConnection");
 const cookieParser = require("cookie-parser");
+const { initializeMQTT } = require("./src/mqtt/initializeMQTT");
 const cors = require("cors");
 const http = require("http");
 
@@ -50,4 +51,5 @@ app.use("/api", centeralRoutes)
 // Start server
 server.listen(port, () => {
     console.log(`Express & WebSocket is running on port : ${port}`);
-})
+    initializeMQTT();
+});
