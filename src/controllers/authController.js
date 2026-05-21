@@ -3,36 +3,15 @@ const User = require("../models/userModel");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../services/emailServices");
-const { z } = require("zod");
 const Subscription = require("../models/subscriptionModel");
 const Organization = require("../models/organizationModel");
 const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
+const { registerSchema, adminCreateUserSchema, createSubUserSchema } = require("../validations/userValidation");
 require("dotenv").config();
 
-// Validation Schemas
-const registerSchema = z.object({
-    name: z.string().min(2),
-    email: z.string().email(),
-    password: z.string().min(8),
-});
 
-const adminCreateUserSchema = z.object({
-    name: z.string().min(2),
-    email: z.string().email(),
-});
-
-const createSubUserSchema = z.object({
-    name: z.string().min(2),
-    email: z.string().email(),
-    role: z.literal("user"),
-    organizations: z.array(z.string()).min(1, "At least one organization is required"),
-    venues: z.array(z.string()).optional(), // Venue IDs
-    permission: z.enum(["view", "manage"]).default("view"),
-    timer: z.string().optional()
-});
-
-
+// register Admin
 const registerAdmin = async (req, res) => {
     try {
         const { name, email, password } = req.body;
@@ -189,7 +168,7 @@ const registerUser = async (req, res) => {
     }
 };
 
-// Admin Creates User (Setup Password Flow)
+// Admin Creates Manager (Setup Password Flow)
 const createUserByAdmin = async (req, res) => {
     let user = null;   // For rollback
 
@@ -295,6 +274,7 @@ const createUserByAdmin = async (req, res) => {
     }
 };
 
+//Manager Creates Users
 const createSubUser = async (req, res) => {
     let newUser = null;
 
