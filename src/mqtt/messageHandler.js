@@ -1,5 +1,6 @@
 const Device = require("../models/deviceModel");
-const { processMonitoringDeviceData } = require("../services/processMonitoringDeviceData");
+const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
+const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
 
 
 // const setupMessageHandler = (client) => {
@@ -141,7 +142,7 @@ const setupMessageHandler = (client) => {
 
                     case "scheduling":
                         console.log(`🔄 Processing as SCHEDULING device...`);
-                        // await processSchedulingDeviceData(device, payload);
+                        await processSchedulingDeviceData(device, payload);
                         break;
 
                     case "trigger":

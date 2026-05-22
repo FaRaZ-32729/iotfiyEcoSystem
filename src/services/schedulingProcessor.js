@@ -1,41 +1,8 @@
-// // src/services/processors/monitoringProcessor.js
-// const checkConditions = require("./conditionChecker");
-
-// const processMonitoringDeviceData = async (device, payload) => {
-//     // Update sensor values
-//     device.espTemperature = payload.temperature !== undefined ? payload.temperature : device.espTemperature;
-//     device.espHumidity = payload.humidity !== undefined ? payload.humidity : device.espHumidity;
-//     device.espOdour = payload.odour !== undefined ? payload.odour : device.espOdour;
-//     device.espAQI = payload.AQI !== undefined ? payload.AQI : device.espAQI;
-//     device.espGL = payload.gass !== undefined ? payload.gass : device.espGL;
-//     device.espVoltage = payload.voltage !== undefined ? payload.voltage : device.espVoltage;
-//     device.espCurrent = payload.current !== undefined ? payload.current : device.espCurrent;
-
-//     device.lastUpdateTime = new Date();
-
-//     const alerts = checkConditions(device, payload);
-
-//     await device.save();
-
-//     // Send to frontend
-//     global.io.emit(`device/${device.deviceId}`, {
-//         deviceId: device.deviceId,
-//         deviceName: device.deviceName,
-//         category: "monitoring",
-//         data: payload,
-//         alerts
-//     });
-// };
-
-// module.exports = { processMonitoringDeviceData };
-
-
-
-// src/services/processors/monitoringProcessor.js
+// src/services/processors/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 
-const processMonitoringDeviceData = async (device, payload) => {
-    console.log(`\n📡 Processing Monitoring Data for Device: ${device.deviceName} (${device.deviceId})`);
+const processSchedulingDeviceData = async (device, payload) => {
+    console.log(`\n📡 Processing SCHEDULING Data for Device: ${device.deviceName} (${device.deviceId})`);
 
     // Update sensor values
     const updatedFields = [];
@@ -107,7 +74,7 @@ const processMonitoringDeviceData = async (device, payload) => {
         console.warn(`⚠️ Socket.io not initialized - cannot send live data`);
     }
 
-    console.log(`✅ Monitoring data processing completed for ${device.deviceId}\n`);
+    console.log(`✅ Scheduling data processing completed for ${device.deviceId}\n`);
 };
 
-module.exports = { processMonitoringDeviceData };
+module.exports = { processSchedulingDeviceData };
