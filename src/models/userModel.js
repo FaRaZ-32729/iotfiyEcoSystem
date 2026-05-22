@@ -83,7 +83,6 @@ const userSchema = new mongoose.Schema({
     },
     permission: {
         type: String,
-        // enum: ["view", "manage"],
         default: null
     },
 

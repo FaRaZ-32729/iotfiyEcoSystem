@@ -6,12 +6,27 @@ let client = null;
 const connectMQTT = () => {
     if (client) return client;
 
+    // const options = {
+    //     host: process.env.MQTT_HOST || "localhost",
+    //     port: parseInt(process.env.MQTT_PORT) || 1883,
+    //     username: process.env.MQTT_USER,
+    //     password: process.env.MQTT_PASS,
+    //     clientId: `iotify-server-${process.pid}-${Date.now()}`,
+    //     reconnectPeriod: 5000,
+    //     keepalive: 60,
+    //     clean: true,
+    //     connectTimeout: 30000,
+    // };
+    
     const options = {
         host: process.env.MQTT_HOST || "localhost",
         port: parseInt(process.env.MQTT_PORT) || 1883,
         username: process.env.MQTT_USER,
         password: process.env.MQTT_PASS,
-        clientId: `iotify-server-${process.pid}-${Date.now()}`,
+
+        // Best clientId
+        clientId: `iotify-server-${process.env.NODE_ENV || 'development'}-${process.pid}`,
+
         reconnectPeriod: 5000,
         keepalive: 60,
         clean: true,

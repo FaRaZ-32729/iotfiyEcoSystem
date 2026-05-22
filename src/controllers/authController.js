@@ -15,6 +15,7 @@ require("dotenv").config();
 const registerAdmin = async (req, res) => {
     try {
         const { name, email, password } = req.body;
+        email = email.toLowerCase().trim();
 
         // Strong validation
         if (!name || !email || !password) {
@@ -65,6 +66,7 @@ const registerUser = async (req, res) => {
 
     try {
         const { name, email, password } = registerSchema.parse(req.body);
+        email = email.toLowerCase().trim();
 
         const existingUser = await User.findOne({ email });
         if (existingUser) {
@@ -174,6 +176,7 @@ const createUserByAdmin = async (req, res) => {
 
     try {
         const { name, email, role = "manager" } = adminCreateUserSchema.parse(req.body);
+        email = email.toLowerCase().trim();
         const admin = req.user;
 
         const existingUser = await User.findOne({ email });
@@ -286,6 +289,8 @@ const createSubUser = async (req, res) => {
         if (manager.role !== "manager") {
             return res.status(403).json({ success: false, message: "Only managers can create sub-users" });
         }
+
+        let email = validatedData.email.toLowerCase().trim();
 
         // Check subscription limit
         await checkSubscriptionLimit("user")(req, res, () => { });
@@ -532,9 +537,14 @@ const verifyOTP = async (req, res) => {
 const loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
+        email = email.toLowerCase().trim();
 
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ message: "User not found" });
+
+        if (!user) {
+            console.log("user not fount ", email)
+            return res.status(404).json({ message: "Invalid credentials" })
+        };
 
         if (!user.isVerified) return res.status(403).json({ message: "Please verify your email first" });
         if (!user.isActive) return res.status(403).json({ message: "Account is not active" });
@@ -548,10 +558,10 @@ const loginUser = async (req, res) => {
         await user.save();
 
         res.cookie('token', token, {
-            httpOnly: true,           // Prevents JavaScript access (Security)
-            secure: process.env.NODE_ENV === 'production', // Use secure in production
-            sameSite: 'strict',       // Protects against CSRF
-            maxAge: 7 * 24 * 60 * 60 * 1000   // 7 days in milliseconds
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
         res.json({
@@ -586,6 +596,7 @@ const logoutUser = async (req, res) => {
 const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
+        email = email.toLowerCase().trim();
 
         if (!email) {
             return res.status(400).json({ success: false, message: "Email is required" });
