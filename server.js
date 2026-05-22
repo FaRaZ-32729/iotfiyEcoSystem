@@ -14,7 +14,7 @@ const centeralRoutes = require("./src/routers/centeralRoutes");
 
 dotenv.config();
 dbConnection();
-// const port = 5053;
+
 const port = process.env.PORT || 5054;
 const app = express();
 const server = http.createServer(app);
@@ -55,11 +55,16 @@ app.use(cookieParser());
 // Routes
 app.use("/api", centeralRoutes)
 
-
+app.get("/", (req, res) => {
+    res.status(200).json({
+        message: "hello faraz"
+    });
+});
 global.io = io;
 initializeMQTT();
 
 // console.log(new Date().toUTCString());
+console.log("backend is running on port")
 // Start server
 server.listen(port, () => {
     console.log(`Express & WebSocket is running on port : ${port}`);
