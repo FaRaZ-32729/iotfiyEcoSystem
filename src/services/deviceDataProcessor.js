@@ -2,46 +2,66 @@
 const Device = require("../models/deviceModel");
 
 const processDeviceData = async (deviceId, payload) => {
-    const device = await Device.findOne({ deviceId });
+    try {
+        // Find device
+        const device = await Device.findOne({ deviceId });
+        if (!device) {
+            console.warn(`⚠️ Device ${deviceId} not found in database`);
+            return;
+        }
 
-    if (!device) {
-        console.warn(`Device ${deviceId} not found`);
-        return;
+        // ==================== UPDATE SENSOR VALUES ====================
+        device.espTemperature = payload.temperature !== undefined ? payload.temperature : device.espTemperature;
+        device.espHumidity = payload.humidity !== undefined ? payload.humidity : device.espHumidity;
+        device.espOdour = payload.odour !== undefined ? payload.odour : device.espOdour;
+        device.espAQI = payload.AQI !== undefined ? payload.AQI : device.espAQI;
+        device.espGL = payload.gass !== undefined ? payload.gass : device.espGL;
+        device.espVoltage = payload.voltage !== undefined ? payload.voltage : device.espVoltage;
+        device.espCurrent = payload.current !== undefined ? payload.current : device.espCurrent;
+
+        device.lastUpdateTime = new Date();
+
+        // ==================== CHECK CONDITIONS & TRIGGER ALERTS ====================
+        const alertsTriggered = checkConditions(device, payload);
+
+        // Save alerts status in device
+        if (alertsTriggered.length > 0) {
+            alertsTriggered.forEach(alert => {
+                const field = `${alert.type}Alert`;
+                if (device[field] !== undefined) {
+                    device[field] = true;
+                }
+            });
+        }
+
+        // Save updated device data
+        await device.save();
+
+        // ==================== SEND LIVE DATA TO FRONTEND ====================
+        global.io.emit(`device/${deviceId}`, {
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            deviceType: device.deviceType,
+            category: device.category,
+            data: payload,
+            alerts: alertsTriggered,
+            timestamp: new Date()
+        });
+
+        console.log(`📡 Data processed for device ${deviceId} | Alerts: ${alertsTriggered.length}`);
+
+    } catch (error) {
+        console.error(`Error processing data for device ${deviceId}:`, error);
     }
-
-    // Update sensor values
-    device.espTemperature = payload.temperature || device.espTemperature;
-    device.espHumidity = payload.humidity || device.espHumidity;
-    device.espOdour = payload.odour || device.espOdour;
-    device.espAQI = payload.AQI || device.espAQI;
-    device.espGL = payload.gass || device.espGL;
-    device.espVoltage = payload.voltage || device.espVoltage;
-    device.espCurrent = payload.current || device.espCurrent;
-    device.lastUpdateTime = new Date();
-
-    // Check conditions and trigger alerts
-    const alertsTriggered = checkConditions(device, payload);
-
-    // if (alertsTriggered.length > 0) {
-    //     await sendAlert(device, alertsTriggered);
-    // }
-
-    await device.save();
-
-    // Emit real-time update via Socket.io
-    global.io.emit(`device/${deviceId}`, {
-        deviceId,
-        data: payload,
-        alerts: alertsTriggered
-    });
 };
 
+// ==================== CONDITION CHECKER ====================
 const checkConditions = (device, payload) => {
     const triggered = [];
 
     device.conditions.forEach(cond => {
         const currentValue = payload[cond.type];
-        if (currentValue === undefined) return;
+        if (currentValue === undefined || currentValue === null) return;
 
         let isTriggered = false;
 
@@ -54,7 +74,8 @@ const checkConditions = (device, payload) => {
                 type: cond.type,
                 value: currentValue,
                 threshold: cond.value,
-                operator: cond.operator
+                operator: cond.operator,
+                message: `${cond.type} is ${cond.operator} ${cond.value}`
             });
         }
     });
