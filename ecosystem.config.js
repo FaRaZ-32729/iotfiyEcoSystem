@@ -13,7 +13,7 @@ module.exports = {
     },
     {
       name: "ecoSystemWorker",
-      script: "worker.js",
+      script: "queueWorker.js",
       instances: 1,
       exec_mode: "fork",
       watch: false,
