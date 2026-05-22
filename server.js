@@ -15,7 +15,7 @@ const centeralRoutes = require("./src/routers/centeralRoutes");
 dotenv.config();
 dbConnection();
 // const port = 5053;
-const port = process.env.PORT || 5053;
+const port = process.env.PORT || 5054;
 const app = express();
 const server = http.createServer(app);
 
