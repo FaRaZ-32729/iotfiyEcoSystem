@@ -19,6 +19,7 @@
 //         keepalive: 60,
 //         clean: true,
 //         connectTimeout: 30000,
+
 //     };
 
 //     client = mqtt.connect(`mqtt://${options.host}:${options.port}`, options);
@@ -76,25 +77,61 @@ const connectMQTT = () => {
         clean: true,
         connectTimeout: 30000,
 
-        // ==================== LAST WILL & TESTAMENT (LWT) ====================
         will: {
-            topic: "iotify/devices/+/status",           // Will publish to all devices
-            payload: JSON.stringify({ status: "offline", timestamp: new Date() }),
+            topic: "iotify/server/status",
+            payload: Buffer.from("offline"),
             qos: 1,
-            retain: true                                // Important: retain last status
+            retain: true
         }
     };
+
+    console.log(`🔌 Connecting to MQTT Broker at ${options.host}:${options.port}`);
 
     client = mqtt.connect(`mqtt://${options.host}:${options.port}`, options);
 
     client.on("connect", () => {
-        console.log(`✅ MQTT Broker Connected | ClientID: ${options.clientId}`);
+        console.log(`✅ MQTT Connected Successfully!`);
+        console.log(`   Client ID: ${options.clientId}`);
 
-        // Subscribe to data and status
+        // Announce server online
+        client.publish("iotify/server/status", "online", { qos: 1, retain: true });
+
+        // Subscribe to device topics
         client.subscribe("iotify/devices/+/data", { qos: 1 });
         client.subscribe("iotify/devices/+/status", { qos: 1 });
 
-        console.log("✅ Subscribed to device data & status topics");
+        console.log("✅ Subscribed to all device topics");
+    });
+
+    // ==================== MESSAGE HANDLER ====================
+    client.on("message", (topic, message) => {
+        const payload = message.toString();
+
+        console.log(`📥 Received on ${topic}: ${payload}`);
+
+        // Handle Device Status (Online / Offline)
+        if (topic.endsWith("/status")) {
+            const deviceId = topic.split("/")[2];   // Extract deviceId from iotify/devices/{deviceId}/status
+
+            if (payload === "online") {
+                console.log(`🟢 Device ${deviceId} is ONLINE`);
+                // You can trigger DB update here later
+            }
+            else if (payload === "offline") {
+                console.log(`🔴 Device ${deviceId} is OFFLINE`);
+                // You can trigger DB update here later
+            }
+            else {
+                console.log(`⚠️ Device ${deviceId} status: ${payload}`);
+            }
+        }
+
+        // Handle Device Data
+        if (topic.endsWith("/data")) {
+            const deviceId = topic.split("/")[2];
+            console.log(`📊 Data from Device ${deviceId}: ${payload}`);
+            // Parse JSON if your devices send JSON
+        }
     });
 
     client.on("error", (err) => {
@@ -105,9 +142,17 @@ const connectMQTT = () => {
         console.log("🔄 MQTT Reconnecting...");
     });
 
+    client.on("offline", () => {
+        console.warn("⚠️ MQTT Client is offline");
+    });
+
     return client;
 };
 
 const getClient = () => client;
 
-module.exports = { connectMQTT, getClient };
+
+module.exports = {
+    connectMQTT,
+    getClient,
+};

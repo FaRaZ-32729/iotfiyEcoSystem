@@ -23,6 +23,16 @@ const deviceSchema = new mongoose.Schema({
         enum: ["monitoring", "scheduling", "trigger"]
     },
 
+    status: {
+        type: String,
+        enum: ["online", "offline"],
+        default: "offline"
+    },
+    lastSeen: {
+        type: Date,
+        default: null
+    },
+
     interval: { type: Number, default: 5, min: 1 },
 
     venue: { type: mongoose.Schema.Types.ObjectId, ref: "Venue", required: true },
