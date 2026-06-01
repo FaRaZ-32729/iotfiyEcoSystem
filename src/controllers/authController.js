@@ -14,7 +14,7 @@ require("dotenv").config();
 // register Admin
 const registerAdmin = async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        let { name, email, password } = req.body;
         email = email.toLowerCase().trim();
 
         // Strong validation
@@ -65,7 +65,7 @@ const registerUser = async (req, res) => {
     let user = null;   // For rollback
 
     try {
-        const { name, email, password } = registerSchema.parse(req.body);
+        let { name, email, password } = registerSchema.parse(req.body);
         email = email.toLowerCase().trim();
 
         const existingUser = await User.findOne({ email });
@@ -175,7 +175,7 @@ const createUserByAdmin = async (req, res) => {
     let user = null;   // For rollback
 
     try {
-        const { name, email, role = "manager" } = adminCreateUserSchema.parse(req.body);
+        let { name, email, role = "manager" } = adminCreateUserSchema.parse(req.body);
         email = email.toLowerCase().trim();
         const admin = req.user;
 
@@ -297,7 +297,7 @@ const createSubUser = async (req, res) => {
         if (res.headersSent) return;
 
         // Check if email already exists
-        const existingUser = await User.findOne({ email: validatedData.email });
+        const existingUser = await User.findOne({ email: email });
         if (existingUser) {
             return res.status(400).json({ success: false, message: "Email already exists" });
         }
@@ -339,7 +339,7 @@ const createSubUser = async (req, res) => {
         // Create user
         newUser = await User.create({
             name: validatedData.name,
-            email: validatedData.email,
+            email: email,
             role: "user",
             creatorId: manager._id,
             createdBy: "manager",
@@ -536,7 +536,7 @@ const verifyOTP = async (req, res) => {
 // Login
 const loginUser = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        let { email, password } = req.body;
         email = email.toLowerCase().trim();
 
         const user = await User.findOne({ email });
@@ -577,7 +577,8 @@ const loginUser = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Server error ...", });
+        console.log(error.message)
     }
 };
 

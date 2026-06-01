@@ -2,34 +2,36 @@
 const { Worker } = require("bullmq");
 const redisConnection = require("./src/config/redisConnection");
 const { publishCommand } = require("./src/mqtt/commandPublisher");
+const Schedule = require("../models/scheduleModel");
 
 const scheduleWorker = new Worker("device-schedules", async (job) => {
     const { deviceId, command, scheduleId } = job.data;
 
     console.log(`⚡ Executing Schedule ${scheduleId} → Device ${deviceId} | Command: ${command}`);
 
-    const success = publishCommand(deviceId, { 
-        type: "COMMAND", 
+    const success = publishCommand(deviceId, {
+        type: "COMMAND",
         command: command,
-        scheduleId 
+        scheduleId
     });
 
     if (!success) {
-        throw new Error("Failed to send command to device");
+        console.log(`❌ Device ${deviceId} is offline. Command will be retried.`);
+        throw new Error("Device offline - retrying later");
     }
 
-    return { status: "success", deviceId, command };
+    return { status: true, deviceId, command };
 }, {
     connection: redisConnection,
-    concurrency: 10
+    concurrency: 15
 });
 
 scheduleWorker.on("completed", (job) => {
-    console.log(`✅ Schedule Job Completed: ${job.id}`);
+    console.log(`✅ Schedule ${job.data.scheduleId} executed successfully`);
 });
 
 scheduleWorker.on("failed", (job, err) => {
-    console.error(`❌ Schedule Job Failed ${job.id}:`, err.message);
+    console.error(`❌ Schedule ${job.data.scheduleId} failed:`, err.message);
 });
 
 console.log("✅ Schedule Worker Started");

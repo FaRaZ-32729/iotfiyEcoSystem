@@ -1,5 +1,6 @@
 // src/services/processors/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
+const scheduleQueue = require("../queues/scheduleQueue");
 
 const processSchedulingDeviceData = async (device, payload) => {
     console.log(`\n📡 Processing SCHEDULING Data for Device: ${device.deviceName} (${device.deviceId})`);

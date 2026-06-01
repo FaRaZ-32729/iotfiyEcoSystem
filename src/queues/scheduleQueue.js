@@ -1,6 +1,6 @@
 // src/queues/scheduleQueue.js
 const { Queue } = require("bullmq");
-const redisConnection = require("../config/redis");
+const redisConnection = require("../config/redisConnection");
 
 const scheduleQueue = new Queue("device-schedules", {
     connection: redisConnection,
