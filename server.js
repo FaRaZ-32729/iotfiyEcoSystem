@@ -53,7 +53,28 @@ app.use(cookieParser());
 
 
 // Routes
-app.use("/api", centeralRoutes)
+app.use("/api", centeralRoutes);
+// Inside server.js — Add this route
+// app.post("/api/test/trigger-schedule", async (req, res) => {
+//     try {
+//         const { deviceId, command = "ON" } = req.body;
+
+//         console.log(`🧪 [TEST TRIGGER] Manual trigger for ${deviceId} | Command: ${command}`);
+
+//         const scheduleQueue = require("./src/queues/scheduleQueue");
+
+//         await scheduleQueue.add(`test-schedule-${Date.now()}`, {
+//             scheduleId: `test-${Date.now()}`,
+//             deviceId,
+//             command
+//         });
+
+//         res.json({ success: true, message: "Test job added to queue" });
+//     } catch (error) {
+//         console.error("Test trigger error:", error);
+//         res.status(500).json({ success: false, error: error.message });
+//     }
+// });
 
 app.get("/", (req, res) => {
     res.status(200).json({

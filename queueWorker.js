@@ -1,39 +1,52 @@
 // src/queues/scheduleWorker.js
+
 const { Worker } = require("bullmq");
 const redisConnection = require("./src/config/redisConnection");
 const { publishCommand } = require("./src/mqtt/commandPublisher");
-const Schedule = require("../models/scheduleModel");
+const Schedule = require("./src/models/eventModel");
+const { connectMQTT } = require("./src/mqtt/mqttClient");
+
+console.log("✅ Schedule Worker Starting...");
+
+// Initialize MQTT for Worker
+connectMQTT();
 
 const scheduleWorker = new Worker("device-schedules", async (job) => {
-    const { deviceId, command, scheduleId } = job.data;
+    console.log(`⚡ [SCHEDULE TRIGGERED] ${new Date().toUTCString()} (UTC) → Job ${job.id}`);
 
-    console.log(`⚡ Executing Schedule ${scheduleId} → Device ${deviceId} | Command: ${command}`);
+    const { scheduleId, deviceId, command } = job.data;
 
     const success = publishCommand(deviceId, {
         type: "COMMAND",
         command: command,
-        scheduleId
+        scheduleId: scheduleId,
+        timestamp: new Date().toISOString()
     });
 
-    if (!success) {
-        console.log(`❌ Device ${deviceId} is offline. Command will be retried.`);
-        throw new Error("Device offline - retrying later");
+    if (success) {
+        console.log(`✅ Command "${command}" sent to ${deviceId}`);
+        return { success: true };
+    } else {
+        console.error(`❌ Failed to send command to ${deviceId}`);
+        throw new Error("MQTT Publish Failed");
     }
 
-    return { status: true, deviceId, command };
 }, {
     connection: redisConnection,
-    concurrency: 15
+    concurrency: 5,
+    timezone: "UTC"           // ← UTC
 });
 
+// Logging
 scheduleWorker.on("completed", (job) => {
-    console.log(`✅ Schedule ${job.data.scheduleId} executed successfully`);
+    console.log(`✅ Schedule Completed → ${job.data.scheduleId}`);
 });
 
 scheduleWorker.on("failed", (job, err) => {
-    console.error(`❌ Schedule ${job.data.scheduleId} failed:`, err.message);
+    console.error(`❌ Schedule Failed → ${job.data?.scheduleId} | ${err.message}`);
 });
 
-console.log("✅ Schedule Worker Started");
+console.log("✅ Schedule Worker Ready (UTC)");
 
 module.exports = scheduleWorker;
+

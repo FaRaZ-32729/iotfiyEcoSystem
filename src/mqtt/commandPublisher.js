@@ -1,20 +1,22 @@
 // src/mqtt/commandPublisher.js
 const { getClient } = require("./mqttClient");
 
-const publishCommand = (deviceId, command) => {
+const publishCommand = (deviceId, commandPayload) => {
     const client = getClient();
-    if (!client) {
-        console.error("MQTT Client not connected");
+
+    if (!client || !client.connected) {
+        console.error(`❌ MQTT Client not connected in worker for device ${deviceId}`);
         return false;
     }
 
     const topic = `iotify/commands/${deviceId}/control`;
-    
-    client.publish(topic, JSON.stringify(command), { qos: 1, retain: false }, (err) => {
+
+    client.publish(topic, JSON.stringify(commandPayload), { qos: 1, retain: false }, (err) => {
         if (err) {
             console.error(`Failed to publish command to ${deviceId}:`, err);
+            return false;
         } else {
-            console.log(`Command sent to device ${deviceId}`);
+            console.log(`✅ Command sent to device ${deviceId} → ${commandPayload.command}`);
         }
     });
 
