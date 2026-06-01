@@ -57,6 +57,10 @@ const createSchedule = async (req, res) => {
             type: "end"
         }, endCron);
 
+
+        console.log("Job Added with Cron:", startCron);
+        console.log("Job Added with Cron:", endCron);
+
         // Save to Database
         const schedule = await Event.create({
             deviceId,
