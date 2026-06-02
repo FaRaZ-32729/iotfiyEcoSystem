@@ -1,5 +1,6 @@
 const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
+const { reconcileMissedCommands } = require("../services/reconciliationService");
 const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
 
 const setupMessageHandler = (client) => {
@@ -39,6 +40,11 @@ const setupMessageHandler = (client) => {
                         });
 
                         console.log(`📤 Emitted to Frontend → deviceStatusUpdate for ${deviceId}`);
+                    }
+
+                    // ==================== RECONCILIATION LOGIC ====================
+                    if (newStatus === "online") {
+                        await reconcileMissedCommands(deviceId);
                     }
 
                 } else {
