@@ -3,6 +3,7 @@ const { Worker } = require("bullmq");
 const redisConnection = require("./src/config/redisConnection");
 const { publishCommand } = require("./src/mqtt/commandPublisher");
 const { connectMQTT } = require("./src/mqtt/mqttClient");
+const Event = require("./src/models/eventModel");
 
 console.log("✅ Schedule Worker Starting...");
 
@@ -23,9 +24,17 @@ initializeMQTTForWorker();
 
 const scheduleWorker = new Worker("device-schedules", async (job) => {
 
-    const { deviceId, command, scheduleId, type } = job.data;
+    const { deviceId, command, scheduleId } = job.data;
 
-    console.log(`⚡ [${type.toUpperCase()}] Executing at ${new Date().toUTCString()} → Device: ${deviceId}`);
+
+    const today = new Date().toISOString().split('T')[0];
+    const schedule = await Event.findById(scheduleId);
+    if (schedule && schedule.manualOverride && schedule.overrideDate === today) {
+        console.log(`⛔ Skipping command ${command} for ${deviceId} due to manual override today`);
+        return { skipped: true, reason: "manual_override" };
+    }
+
+
     console.log(`⚡ [SCHEDULE EXECUTING] ${new Date().toUTCString()}`);
     console.log(`   Device: ${deviceId} | Command: ${command} | Job: ${scheduleId}`);
 

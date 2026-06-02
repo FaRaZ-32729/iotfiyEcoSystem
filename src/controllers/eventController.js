@@ -3,6 +3,7 @@ const Event = require("../models/eventModel");
 const Device = require("../models/deviceModel");
 const { generateCron, isOvernight } = require("../queues/cronHelper");
 const { addScheduleJob } = require("../queues/scheduleService");
+const { publishCommand } = require("../mqtt/commandPublisher");
 
 // src/controllers/eventController.js
 const createSchedule = async (req, res) => {
@@ -45,7 +46,7 @@ const createSchedule = async (req, res) => {
         // Unique Job IDs
         const startJobId = `start-${deviceId}-${Date.now()}`;
         const endJobId = `end-${deviceId}-${Date.now()}`;
-        
+
         // Add ON Job
         await addScheduleJob(startJobId, {
             scheduleId: startJobId,
@@ -99,4 +100,77 @@ const createSchedule = async (req, res) => {
 };
 
 
-module.exports = { createSchedule };
+const manualToggle = async (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        const user = req.user;
+
+        if (!deviceId) {
+            return res.status(400).json({ success: false, message: "deviceId is required" });
+        }
+
+        const device = await Device.findOne({ deviceId });
+        if (!device) {
+            return res.status(404).json({ success: false, message: "Device not found" });
+        }
+
+        if (device.status !== "online") {
+            return res.status(400).json({
+                success: false,
+                message: "Device is offline. Cannot send command."
+            });
+        }
+
+        const newCommand = device.state === "ON" ? "OFF" : "ON";
+
+        console.log(`🔧 Manual Toggle: ${device.state} → ${newCommand} for ${deviceId}`);
+
+        // Send command
+        const success = publishCommand(deviceId, {
+            type: "COMMAND",
+            command: newCommand,
+            isManual: true,
+            timestamp: new Date().toISOString()
+        });
+
+        if (!success) {
+            return res.status(500).json({ success: false, message: "Failed to send command" });
+        }
+
+        // Update device state immediately
+        device.state = newCommand;
+        await device.save();
+
+        // ==================== OVERRIDE LOGIC ====================
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
+
+        // Find active schedule for today
+        const activeSchedule = await Event.findOne({
+            deviceId,
+            status: "ACTIVE",
+            days: { $in: [new Date().toLocaleString('en-US', { weekday: 'long' }).toLowerCase()] }
+        });
+
+        if (activeSchedule) {
+            activeSchedule.manualOverride = true;
+            activeSchedule.overrideDate = today;
+            await activeSchedule.save();
+
+            console.log(`🚫 Manual override activated for schedule ${activeSchedule._id} today`);
+        }
+
+        res.json({
+            success: true,
+            message: `Device manually turned ${newCommand}`,
+            newState: newCommand,
+            deviceId
+        });
+
+    } catch (error) {
+        console.error("Manual Toggle Error:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+
+module.exports = { createSchedule, manualToggle };

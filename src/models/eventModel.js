@@ -44,6 +44,16 @@ const eventSchema = new mongoose.Schema({
     isOvernight: {
         type: Boolean,
         default: false
+    },
+
+    manualOverride: {
+        type: Boolean,
+        default: false
+    },
+
+    overrideDate: {
+        type: String,
+        default: null
     }
 
 }, { timestamps: true });
