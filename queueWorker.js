@@ -22,9 +22,12 @@ const initializeMQTTForWorker = async () => {
 initializeMQTTForWorker();
 
 const scheduleWorker = new Worker("device-schedules", async (job) => {
-    console.log(`⚡ [SCHEDULE TRIGGERED] ${new Date().toUTCString()} → Job ${job.id} | Device: ${job.data.deviceId}`);
 
-    const { deviceId, command, scheduleId } = job.data;
+    const { deviceId, command, scheduleId, type } = job.data;
+
+    console.log(`⚡ [${type.toUpperCase()}] Executing at ${new Date().toUTCString()} → Device: ${deviceId}`);
+    console.log(`⚡ [SCHEDULE EXECUTING] ${new Date().toUTCString()}`);
+    console.log(`   Device: ${deviceId} | Command: ${command} | Job: ${scheduleId}`);
 
     if (!mqttConnected) {
         console.warn("⚠️ MQTT not connected, trying to reconnect...");
@@ -43,7 +46,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         return { success: true };
     } else {
         console.error(`❌ Failed to publish command to ${deviceId}`);
-        throw new Error("MQTT Publish Failed");
+        throw new Error(`Device ${deviceId} unreachable`);
     }
 
 }, {
@@ -62,7 +65,7 @@ scheduleWorker.on("failed", (job, err) => {
 });
 
 scheduleWorker.on("error", (err) => {
-    console.error("Worker Error:", err);
+    console.error("Worker Error:", err.message);
 });
 
 console.log("✅ Schedule Worker Ready");

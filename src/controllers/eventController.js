@@ -10,6 +10,11 @@ const createSchedule = async (req, res) => {
         const { deviceId, startTime, endTime, days, command = "ON" } = req.body;
         const user = req.user;
 
+        // Validation
+        if (!deviceId || !startTime || !endTime || !days || days.length === 0) {
+            return res.status(400).json({ success: false, message: "Missing required fields" });
+        }
+
         const device = await Device.findOne({ deviceId });
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
@@ -38,15 +43,32 @@ const createSchedule = async (req, res) => {
         console.log(`📅 New Schedule → Start: ${startCron} | End: ${endCron} | Overnight: ${overnight}`);
 
         // Unique Job IDs
-        const startJobId = `${deviceId}-ON-${startCron}`;
-        const endJobId = `${deviceId}-OFF-${endCron}`;
+        const startJobId = `start-${deviceId}-${Date.now()}`;
+        const endJobId = `end-${deviceId}-${Date.now()}`;
 
+        // // Add ON Job
+        // await addScheduleJob(startJobId, {
+        //     scheduleId: startJobId,
+        //     deviceId,
+        //     command: "ON",
+        //     type: "start"
+        // }, startCron);
+
+        // // Add OFF Job
+        // await addScheduleJob(endJobId, {
+        //     scheduleId: endJobId,
+        //     deviceId,
+        //     command: "OFF",
+        //     type: "end"
+        // }, endCron);
         // Add ON Job
         await addScheduleJob(startJobId, {
             scheduleId: startJobId,
             deviceId,
             command: "ON",
-            type: "start"
+            type: "start",
+            startTime: startTime,     // ← Add this
+            endTime: endTime          // ← Add this
         }, startCron);
 
         // Add OFF Job
@@ -54,12 +76,14 @@ const createSchedule = async (req, res) => {
             scheduleId: endJobId,
             deviceId,
             command: "OFF",
-            type: "end"
+            type: "end",
+            startTime: startTime,     // ← Add this
+            endTime: endTime          // ← Add this
         }, endCron);
 
 
-        console.log("Job Added with Cron:", startCron);
-        console.log("Job Added with Cron:", endCron);
+        console.log("Start Job Added with Cron:", startCron);
+        console.log("End Job Added with Cron:", endCron);
 
         // Save to Database
         const schedule = await Event.create({

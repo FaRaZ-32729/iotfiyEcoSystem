@@ -212,7 +212,7 @@ const updateVenue = async (req, res) => {
 
         await venue.save();
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Venue updated successfully",
             venue
