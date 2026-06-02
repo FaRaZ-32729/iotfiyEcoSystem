@@ -160,7 +160,15 @@ const getSingleDevice = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const device = await Device.findById(id).populate("venue", "name");
+        // const device = await Device.findById(id).populate("venue", "name");
+        const device = await Device.findById(id).populate({
+            path: "venue",
+            select: "name organization",
+            populate: {
+                path: "organization",
+                select: "name" // add other fields you need
+            }
+        });
 
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });

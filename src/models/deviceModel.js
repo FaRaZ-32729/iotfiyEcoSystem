@@ -28,6 +28,13 @@ const deviceSchema = new mongoose.Schema({
         enum: ["online", "offline"],
         default: "offline"
     },
+
+    state: {
+        type: String,
+        enum: ["ON", "OFF"],
+        default: "OFF"
+    },
+
     lastSeen: {
         type: Date,
         default: null
@@ -88,12 +95,19 @@ deviceSchema.pre('save', async function () {
         "conditions", "apiKey",
         "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
         "lastUpdateTime",
+        "status",
+        "lastSeen",
         ...(allowedFields[type] || [])
     ];
 
     if (category === "trigger") {
         keepFields.push("interval");
     }
+    if (category === "scheduling") {
+        keepFields.push("state");
+    }
+
+
 
     // Remove all unwanted fields
     Object.keys(this.toObject()).forEach(key => {
@@ -126,6 +140,10 @@ deviceSchema.set('toJSON', {
 
         if (category === "trigger") {
             keepFields.push("interval");
+        }
+
+        if (category !== "scheduling") {
+            delete ret.state;
         }
 
         Object.keys(ret).forEach(key => {

@@ -45,22 +45,7 @@ const createSchedule = async (req, res) => {
         // Unique Job IDs
         const startJobId = `start-${deviceId}-${Date.now()}`;
         const endJobId = `end-${deviceId}-${Date.now()}`;
-
-        // // Add ON Job
-        // await addScheduleJob(startJobId, {
-        //     scheduleId: startJobId,
-        //     deviceId,
-        //     command: "ON",
-        //     type: "start"
-        // }, startCron);
-
-        // // Add OFF Job
-        // await addScheduleJob(endJobId, {
-        //     scheduleId: endJobId,
-        //     deviceId,
-        //     command: "OFF",
-        //     type: "end"
-        // }, endCron);
+        
         // Add ON Job
         await addScheduleJob(startJobId, {
             scheduleId: startJobId,
