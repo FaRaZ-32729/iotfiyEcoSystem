@@ -49,7 +49,7 @@ const reconcileMissedCommands = async (deviceId) => {
                     isActiveNow = true;
                 }
             } else {
-                
+
                 if (currentTime >= startTime || currentTime < endTime) {
                     isActiveNow = true;
                 }
@@ -62,11 +62,33 @@ const reconcileMissedCommands = async (deviceId) => {
         }
 
         if (activeSchedule) {
+            let durationSeconds = null;
+
+            const [endHour, endMinute] = activeSchedule.endTime.split(':').map(Number);
+
+            let endDate = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
+                endHour,
+                endMinute,
+                0
+            ));
+
+            // Handle overnight case
+            if (endDate <= now) {
+                endDate.setUTCDate(endDate.getUTCDate() + 1);
+            }
+
+            durationSeconds = Math.floor((endDate - now) / 1000);
+
             console.log(`✅ Found active schedule → Sending ON command to ${deviceId}`);
+
             publishCommand(deviceId, {
                 type: "COMMAND",
                 command: "ON",
-                scheduleId: activeSchedule._id
+                scheduleId: activeSchedule._id,
+                durationSeconds: durationSeconds
             });
         } else {
             console.log(`⏭️  No active schedule window currently for ${deviceId}`);

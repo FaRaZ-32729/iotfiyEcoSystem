@@ -49,6 +49,35 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     console.log(`⚡ [SCHEDULE EXECUTING] ${new Date().toUTCString()}`);
     console.log(`   Device: ${deviceId} | Command: ${command}`);
 
+    // ==================== CALCULATE REMAINING SECONDS ====================
+    let durationSeconds = null;
+
+    if (command === "ON" && schedule.endTime) {
+        const now = new Date();
+        const currentHour = now.getUTCHours();
+        const currentMinute = now.getUTCMinutes();
+
+        const [endHour, endMinute] = schedule.endTime.split(':').map(Number);
+
+        let endDate = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+            endHour,
+            endMinute,
+            0
+        ));
+
+        // If end time is in the past (overnight case), add 24 hours
+        if (endDate <= now) {
+            endDate.setUTCDate(endDate.getUTCDate() + 1);
+        }
+
+        durationSeconds = Math.floor((endDate - now) / 1000);
+
+        console.log(`⏱️ Remaining duration until end: ${durationSeconds} seconds`);
+    }
+
     if (!mqttConnected) {
         console.warn("⚠️ MQTT not connected, trying to reconnect...");
         await initializeMQTTForWorker();
@@ -57,6 +86,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     const success = publishCommand(deviceId, {
         type: "COMMAND",
         command: command,
+        durationSeconds: durationSeconds,
         timestamp: new Date().toISOString()
     });
 
