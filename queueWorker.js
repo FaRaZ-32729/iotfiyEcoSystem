@@ -25,14 +25,21 @@ initializeMQTTForWorker();
 
 const scheduleWorker = new Worker("device-schedules", async (job) => {
 
-    const { deviceId, command, scheduleId } = job.data;
+    const { deviceId, command, eventId } = job.data;
+    console.log(" job data ", job.data)
 
+
+    const schedule = await Event.findOne({
+        _id: eventId,
+        deviceId: deviceId,
+    })
+    console.log("event", schedule)
+    if (schedule && schedule.isRecurring && schedule.status === "INACTIVE") {
+        console.log(`⛔ Skipping command ${command} for ${deviceId} - Recurring event is INACTIVE`);
+        return { skipped: true, reason: "inactive_recurring" };
+    }
 
     const today = new Date().toISOString().split('T')[0];
-    const schedule = await Event.findOne({
-        deviceId: deviceId,
-        status: "ACTIVE"
-    })
     if (schedule && schedule.manualOverride && schedule.overrideDate === today) {
         console.log(`⛔ Skipping command ${command} for ${deviceId} due to manual override today`);
         return { skipped: true, reason: "manual_override" };
@@ -40,7 +47,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
 
 
     console.log(`⚡ [SCHEDULE EXECUTING] ${new Date().toUTCString()}`);
-    console.log(`   Device: ${deviceId} | Command: ${command} | Job: ${scheduleId}`);
+    console.log(`   Device: ${deviceId} | Command: ${command}`);
 
     if (!mqttConnected) {
         console.warn("⚠️ MQTT not connected, trying to reconnect...");
@@ -50,7 +57,6 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     const success = publishCommand(deviceId, {
         type: "COMMAND",
         command: command,
-        scheduleId: scheduleId,
         timestamp: new Date().toISOString()
     });
 
@@ -69,12 +75,30 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
 });
 
 // Better logging
+// scheduleWorker.on("completed", (job) => {
+//     console.log(`✅ Job Completed: ${job}`);
+// });
+
+// scheduleWorker.on("failed", (job, err) => {
+//     console.error(`❌ Job Failed: ${job?.data} | ${err.message}`);
+// });
+
+// ==================== IMPROVED LOGGING ====================
 scheduleWorker.on("completed", (job) => {
-    console.log(`✅ Job Completed: ${job.data.scheduleId}`);
+    console.log(`✅ Job Completed Successfully`);
+    console.log(`   Job ID     : ${job.id}`);
+    console.log(`   Device     : ${job.data.deviceId}`);
+    console.log(`   Command    : ${job.data.command}`);
+    console.log(`   Event ID   : ${job.data.eventId}`);
+    console.log("────────────────────────────────────");
 });
 
 scheduleWorker.on("failed", (job, err) => {
-    console.error(`❌ Job Failed: ${job?.data?.scheduleId} | ${err.message}`);
+    console.error(`❌ Job Failed`);
+    console.error(`   Job ID     : ${job?.id}`);
+    console.error(`   Device     : ${job?.data?.deviceId}`);
+    console.error(`   Error      : ${err.message}`);
+    console.error("────────────────────────────────────");
 });
 
 scheduleWorker.on("error", (err) => {

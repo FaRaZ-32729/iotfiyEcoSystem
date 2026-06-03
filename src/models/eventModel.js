@@ -54,6 +54,10 @@ const eventSchema = new mongoose.Schema({
     overrideDate: {
         type: String,
         default: null
+    },
+    isRecurring: {
+        type: Boolean,
+        default: null
     }
 
 }, { timestamps: true });

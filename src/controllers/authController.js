@@ -573,7 +573,8 @@ const loginUser = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                isActive: user.isActive
+                isActive: user.isActive,
+                permission: user.permission || null
             }
         });
     } catch (error) {

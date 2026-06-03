@@ -12,9 +12,9 @@ const reconcileMissedCommands = async (deviceId) => {
         const currentTime = `${currentHour}:${currentMinute}`;
 
         // Get UTC day name correctly
-        const utcDay = now.toLocaleString('en-US', { 
-            weekday: 'long', 
-            timeZone: 'UTC' 
+        const utcDay = now.toLocaleString('en-US', {
+            weekday: 'long',
+            timeZone: 'UTC'
         }).toLowerCase();
 
         console.log(`🔍 Reconciling at UTC ${currentTime} | Day: ${utcDay} | Device: ${deviceId}`);
@@ -32,6 +32,12 @@ const reconcileMissedCommands = async (deviceId) => {
         let activeSchedule = null;
 
         for (const schedule of schedules) {
+
+            if (schedule.isRecurring && schedule.status === "INACTIVE") {
+                console.log(`⛔ Skipping reconciliation for ${deviceId} - Recurring event is INACTIVE`);
+                continue;
+            }
+
             const { startTime, endTime, days, isOvernight } = schedule;
 
             if (!days.includes(utcDay)) continue;
@@ -43,7 +49,7 @@ const reconcileMissedCommands = async (deviceId) => {
                     isActiveNow = true;
                 }
             } else {
-                // Overnight schedule (e.g., 22:00 to 06:00)
+                
                 if (currentTime >= startTime || currentTime < endTime) {
                     isActiveNow = true;
                 }
