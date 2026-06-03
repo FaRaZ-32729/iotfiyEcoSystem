@@ -113,7 +113,7 @@ const manualToggle = async (req, res) => {
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
-
+        
         if (device.status !== "online") {
             return res.status(400).json({
                 success: false,

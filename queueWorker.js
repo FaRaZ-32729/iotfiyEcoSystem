@@ -4,11 +4,12 @@ const redisConnection = require("./src/config/redisConnection");
 const { publishCommand } = require("./src/mqtt/commandPublisher");
 const { connectMQTT } = require("./src/mqtt/mqttClient");
 const Event = require("./src/models/eventModel");
+const dbConnection = require("./src/config/dbConnection");
 
 console.log("✅ Schedule Worker Starting...");
 
 let mqttConnected = false;
-
+dbConnection();
 // Connect MQTT with better error handling
 const initializeMQTTForWorker = async () => {
     try {
@@ -28,7 +29,10 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
 
 
     const today = new Date().toISOString().split('T')[0];
-    const schedule = await Event.findById(scheduleId);
+    const schedule = await Event.findOne({
+        deviceId: deviceId,
+        status: "ACTIVE"
+    })
     if (schedule && schedule.manualOverride && schedule.overrideDate === today) {
         console.log(`⛔ Skipping command ${command} for ${deviceId} due to manual override today`);
         return { skipped: true, reason: "manual_override" };

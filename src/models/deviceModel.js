@@ -120,7 +120,7 @@ deviceSchema.pre('save', async function () {
 deviceSchema.set('toJSON', {
     transform: function (doc, ret) {
         const type = doc.deviceType;
-        const category = this.category;
+        const category = doc.category;
 
         const allowedFields = {
             "OD": ["odourAlert", "espOdour"],
@@ -135,11 +135,14 @@ deviceSchema.set('toJSON', {
             "conditions", "apiKey",
             "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
             "lastUpdateTime",
+            "state",
+            "interval",
             ...(allowedFields[type] || [])
         ];
 
-        if (category === "trigger") {
-            keepFields.push("interval");
+        if (category !== "trigger") {
+            // keepFields.push("interval");
+            delete ret.interval;
         }
 
         if (category !== "scheduling") {
