@@ -1,11 +1,23 @@
 // src/services/processors/triggerProcessor.js
 const checkConditions = require("./conditionChecker");
 const scheduleQueue = require("../queues/scheduleQueue");
+const { publishCommand } = require("../mqtt/commandPublisher");
 
 const processTriggerDeviceData = async (device, payload) => {
     console.log(`\n🚨 Processing TRIGGER Data for Device: ${device.deviceName} (${device.deviceId})`);
 
+
+
     const updatedFields = [];
+
+    if (payload.state !== undefined) {
+        const newState = String(payload.state).toUpperCase().trim();
+        if (["ON", "OFF"].includes(newState)) {
+            device.state = newState;
+            updatedFields.push(`state: ${newState}`);
+            console.log(`🔄 Device state updated to ${newState}`);
+        }
+    }
 
     // Update common sensor values
     if (payload.temperature !== undefined) {
@@ -57,7 +69,10 @@ const processTriggerDeviceData = async (device, payload) => {
         }
     }
 
-    if (shouldTrigger) {
+    if (device.manualButton === true) {
+        console.log(`🔧 Manual Button is ENABLED → Skipping auto trigger`);
+    }
+    else if (shouldTrigger) {
         const intervalSeconds = device.interval || 5;
 
         const endTime = new Date(Date.now() + intervalSeconds * 1000);
@@ -69,7 +84,6 @@ const processTriggerDeviceData = async (device, payload) => {
         const success = publishCommand(device.deviceId, {
             type: "COMMAND",
             command: "ON",
-            eventId: `trigger-${device.deviceId}-${Date.now()}`,
             durationSeconds: intervalSeconds,
             endTime: endTimeISO
         });
@@ -83,7 +97,6 @@ const processTriggerDeviceData = async (device, payload) => {
             await scheduleQueue.add("trigger-off", {
                 deviceId: device.deviceId,
                 command: "OFF",
-                eventId: `trigger-${device.deviceId}`,
                 reason: "auto_interval"
             }, {
                 delay: intervalSeconds * 1000,
@@ -108,6 +121,7 @@ const processTriggerDeviceData = async (device, payload) => {
         deviceName: device.deviceName,
         deviceType: device.deviceType,
         category: "trigger",
+        state: device.state,
         data: payload,
         alerts: alerts,
         interval: device.interval,

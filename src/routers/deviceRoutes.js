@@ -1,6 +1,6 @@
 const express = require("express");
 const authenticate = require("../middlewares/auth");
-const { createDevice, getAllDevices, getSingleDevice, getDevicesByVenue, updateDevice, deleteDevice } = require("../controllers/deviceController");
+const { createDevice, getAllDevices, getSingleDevice, getDevicesByVenue, updateDevice, deleteDevice, manualButtonForTriggerDevice } = require("../controllers/deviceController");
 const checkManagePermission = require("../middlewares/checkPermission");
 const router = express.Router();
 
@@ -10,5 +10,7 @@ router.get("/single/:id", getSingleDevice);
 router.get("/get-by-venue/:venueId", getDevicesByVenue);
 router.put("/update/:id", updateDevice);
 router.delete("/delete/:id", deleteDevice);
+
+router.put("/manual-trigger/:deviceId", authenticate, manualButtonForTriggerDevice);
 
 module.exports = router;

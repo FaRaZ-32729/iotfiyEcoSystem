@@ -35,6 +35,11 @@ const deviceSchema = new mongoose.Schema({
         default: "OFF"
     },
 
+    manualButton: {
+        type: Boolean,
+        default: false
+    },
+
     lastSeen: {
         type: Date,
         default: null
@@ -100,11 +105,13 @@ deviceSchema.pre('save', async function () {
         ...(allowedFields[type] || [])
     ];
 
-    if (category === "trigger") {
-        keepFields.push("interval");
-    }
-    if (category === "scheduling") {
+    if (category === "scheduling" || category === "trigger") {
         keepFields.push("state");
+    }
+
+    if (category === "trigger") {
+        keepFields.push("manualButton");
+        keepFields.push("interval");
     }
 
 
@@ -141,11 +148,11 @@ deviceSchema.set('toJSON', {
         ];
 
         if (category !== "trigger") {
-            // keepFields.push("interval");
             delete ret.interval;
+            delete ret.manualButton;
         }
 
-        if (category !== "scheduling") {
+        if (category !== "scheduling" || category !== "trigger") {
             delete ret.state;
         }
 

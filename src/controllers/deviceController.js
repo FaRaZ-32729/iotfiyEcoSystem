@@ -3,6 +3,7 @@ const Device = require("../models/deviceModel");
 const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const { createDeviceSchema, updateDeviceSchema } = require("../validations/deviceValidation");
+const { publishCommand } = require("../mqtt/commandPublisher");
 
 // Helper function to generate API Key
 const generateApiKey = (deviceId) => {
@@ -269,4 +270,95 @@ const deleteDevice = async (req, res) => {
     }
 };
 
-module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice };
+const manualButtonForTriggerDevice = async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const { state } = req.body;   // "ON" or "OFF"
+
+        if (!["ON", "OFF"].includes(state)) {
+            return res.status(400).json({
+                success: false,
+                message: "State must be either 'ON' or 'OFF'"
+            });
+        }
+
+        const device = await Device.findOne({ deviceId });
+
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                message: "Device not found"
+            });
+        }
+
+        if (device.category !== "trigger") {
+            return res.status(403).json({
+                success: false,
+                message: "This API is only for Trigger devices"
+            });
+        }
+
+        // ==================== OFFLINE CHECK ====================
+        if (device.status === "offline") {
+            return res.status(200).json({
+                success: true,
+                message: `Device is currently OFFLINE. `,
+            });
+        }
+
+        // Update state and manualButton
+        const newManualButton = state === "ON";
+
+        device.state = state;
+        device.manualButton = newManualButton;
+        device.lastUpdateTime = new Date();
+
+        await device.save();
+
+        // Publish command to ESP32
+        const success = publishCommand(deviceId, {
+            type: "COMMAND",
+            command: state,
+            manualControl: true,
+            timestamp: new Date().toISOString()
+        });
+
+        if (success) {
+            console.log(`🔧 Manual ${state} command sent to Trigger Device: ${device.deviceName}`);
+        } else {
+            console.warn(`⚠️ Failed to send manual command to ${deviceId}`);
+        }
+
+        // Send real-time update to frontend
+        if (global.io) {
+            global.io.emit(`device/${deviceId}`, {
+                deviceId: device.deviceId,
+                deviceName: device.deviceName,
+                category: "trigger",
+                state: device.state,
+                manualButton: device.manualButton,
+                timestamp: new Date()
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Device successfully set to ${state}`,
+            device: {
+                deviceId: device.deviceId,
+                deviceName: device.deviceName,
+                state: device.state,
+                manualButton: device.manualButton
+            }
+        });
+
+    } catch (error) {
+        console.error("Manual Trigger Control Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while updating device state"
+        });
+    }
+};
+
+module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice, manualButtonForTriggerDevice };
