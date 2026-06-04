@@ -5,6 +5,7 @@ const { publishCommand } = require("./src/mqtt/commandPublisher");
 const { connectMQTT } = require("./src/mqtt/mqttClient");
 const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
+const Device = require("./src/models/deviceModel");
 
 console.log("✅ Schedule Worker Starting...");
 
@@ -26,7 +27,22 @@ initializeMQTTForWorker();
 const scheduleWorker = new Worker("device-schedules", async (job) => {
 
     const { deviceId, command, eventId } = job.data;
-    console.log(" job data ", job.data)
+    console.log(" job data ", job.data);
+
+
+    // ==================== FETCH DEVICE ====================
+    const device = await Device.findOne({ deviceId });
+
+    if (!device) {
+        console.warn(`⚠️ Device ${deviceId} not found`);
+        return;
+    }
+
+    // ==================== MANUAL BUTTON CHECK FOR TRIGGER DEVICES ====================
+    if (device.category === "trigger" && device.manualButton === true) {
+        console.log(`🔧 Manual Button is ENABLED for Trigger Device ${deviceId} → Skipping command`);
+        return { skipped: true, reason: "manual_button_enabled" };
+    }
 
 
     const schedule = await Event.findOne({
@@ -104,22 +120,12 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     timezone: "UTC"
 });
 
-// Better logging
-// scheduleWorker.on("completed", (job) => {
-//     console.log(`✅ Job Completed: ${job}`);
-// });
-
-// scheduleWorker.on("failed", (job, err) => {
-//     console.error(`❌ Job Failed: ${job?.data} | ${err.message}`);
-// });
-
 // ==================== IMPROVED LOGGING ====================
 scheduleWorker.on("completed", (job) => {
     console.log(`✅ Job Completed Successfully`);
     console.log(`   Job ID     : ${job.id}`);
     console.log(`   Device     : ${job.data.deviceId}`);
     console.log(`   Command    : ${job.data.command}`);
-    console.log(`   Event ID   : ${job.data.eventId}`);
     console.log("────────────────────────────────────");
 });
 

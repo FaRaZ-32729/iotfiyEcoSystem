@@ -6,6 +6,7 @@ const { publishCommand } = require("../mqtt/commandPublisher");
 const processTriggerDeviceData = async (device, payload) => {
     console.log(`\n🚨 Processing TRIGGER Data for Device: ${device.deviceName} (${device.deviceId})`);
 
+    console.log("data i received form esp", payload)
 
 
     const updatedFields = [];
@@ -78,7 +79,7 @@ const processTriggerDeviceData = async (device, payload) => {
         const endTime = new Date(Date.now() + intervalSeconds * 1000);
         const endTimeISO = endTime.toISOString();
 
-        console.log(`⚡ Trigger Activated! Sending ON for ${intervalSeconds} seconds`);
+        // console.log(`⚡ Trigger Activated! Sending ON for ${intervalSeconds} seconds`);
 
         // Send ON command with duration
         const success = publishCommand(device.deviceId, {
