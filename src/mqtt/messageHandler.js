@@ -2,6 +2,7 @@ const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
 const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
+const { processTriggerDeviceData } = require("../services/triggerProcessor");
 
 const setupMessageHandler = (client) => {
     if (!client) return;
@@ -90,7 +91,7 @@ const setupMessageHandler = (client) => {
 
                     case "trigger":
                         console.log(`🔄 Processing as TRIGGER device...`);
-                        // await processTriggerDeviceData(device, payload);
+                        await processTriggerDeviceData(device, payload);
                         break;
 
                     default:

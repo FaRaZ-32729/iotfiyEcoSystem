@@ -716,23 +716,43 @@ const me = async (req, res) => {
     try {
         const user = req.user;
 
-        // Return only safe, necessary fields
+        // Populate venues with venue details + organization info
+        const populatedUser = await user.populate({
+            path: 'venues.venueId',
+            select: 'name organization',
+            populate: {
+                path: 'organization',
+                select: 'name _id'   // Get organization name and id
+            }
+        });
+
         const safeUser = {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            permission: user.permission,
-            isActive: user.isActive,
-            isVerified: user.isVerified,
-            timer: user.timer,
-            createdBy: user.createdBy,
-            lastLogin: user.lastLogin,
-            // Organizations & Venues (if needed)
-            organizations: user.organizations,
-            venues: user.venues,
+            id: populatedUser._id,
+            name: populatedUser.name,
+            email: populatedUser.email,
+            role: populatedUser.role,
+            permission: populatedUser.permission,
+            isActive: populatedUser.isActive,
+            isVerified: populatedUser.isVerified,
+            timer: populatedUser.timer,
+            createdBy: populatedUser.createdBy,
+            lastLogin: populatedUser.lastLogin,
+
+            // Organizations (array of IDs)
+            organizations: populatedUser.organizations,
+
+            // Venues with full info + organization
+            venues: populatedUser.venues.map(v => ({
+                venueId: v.venueId?._id,
+                venueName: v.venueName || v.venueId?.name,
+                organization: v.venueId?.organization ? {
+                    id: v.venueId.organization._id,
+                    name: v.venueId.organization.name
+                } : null
+            })),
+
             // Subscription info
-            currentSubscription: user.currentSubscription
+            currentSubscription: populatedUser.currentSubscription
         };
 
         return res.status(200).json({
@@ -748,6 +768,43 @@ const me = async (req, res) => {
         });
     }
 };
+
+// const me = async (req, res) => {
+//     try {
+//         const user = req.user;
+
+//         // Return only safe, necessary fields
+//         const safeUser = {
+//             id: user._id,
+//             name: user.name,
+//             email: user.email,
+//             role: user.role,
+//             permission: user.permission,
+//             isActive: user.isActive,
+//             isVerified: user.isVerified,
+//             timer: user.timer,
+//             createdBy: user.createdBy,
+//             lastLogin: user.lastLogin,
+//             // Organizations & Venues (if needed)
+//             organizations: user.organizations,
+//             venues: user.venues,
+//             // Subscription info
+//             currentSubscription: user.currentSubscription
+//         };
+
+//         return res.status(200).json({
+//             success: true,
+//             user: safeUser
+//         });
+
+//     } catch (error) {
+//         console.error("Error While Verifying User:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Server error"
+//         });
+//     }
+// };
 
 module.exports = {
     registerUser,

@@ -1,0 +1,125 @@
+// src/services/processors/triggerProcessor.js
+const checkConditions = require("./conditionChecker");
+const scheduleQueue = require("../queues/scheduleQueue");
+
+const processTriggerDeviceData = async (device, payload) => {
+    console.log(`\n🚨 Processing TRIGGER Data for Device: ${device.deviceName} (${device.deviceId})`);
+
+    const updatedFields = [];
+
+    // Update common sensor values
+    if (payload.temperature !== undefined) {
+        device.espTemperature = payload.temperature;
+        updatedFields.push(`temperature: ${payload.temperature}`);
+    }
+    if (payload.humidity !== undefined) {
+        device.espHumidity = payload.humidity;
+        updatedFields.push(`humidity: ${payload.humidity}`);
+    }
+    if (payload.odour !== undefined) {
+        device.espOdour = payload.odour;
+        updatedFields.push(`odour: ${payload.odour}`);
+    }
+    if (payload.AQI !== undefined) {
+        device.espAQI = payload.AQI;
+        updatedFields.push(`AQI: ${payload.AQI}`);
+    }
+    if (payload.gass !== undefined) {
+        device.espGL = payload.gass;
+        updatedFields.push(`gass: ${payload.gass}`);
+    }
+    if (payload.voltage !== undefined) {
+        device.espVoltage = payload.voltage;
+        updatedFields.push(`voltage: ${payload.voltage}`);
+    }
+    if (payload.current !== undefined) {
+        device.espCurrent = payload.current;
+        updatedFields.push(`current: ${payload.current}`);
+    }
+
+    device.lastUpdateTime = new Date();
+
+    // Check conditions and get alerts
+    const alerts = checkConditions(device, payload);
+
+    let shouldTrigger = false;
+
+    // Trigger only if there is any alert EXCEPT temperature and humidity
+    if (alerts.length > 0) {
+        const criticalAlerts = alerts.filter(alert =>
+            !["temperature", "humidity"].includes(alert.type)
+        );
+
+        if (criticalAlerts.length > 0) {
+            shouldTrigger = true;
+            console.log(`🚨 Critical Alert(s) Detected: ${criticalAlerts.length}`);
+            criticalAlerts.forEach(a => console.log(`   → ${a.message}`));
+        }
+    }
+
+    if (shouldTrigger) {
+        const intervalSeconds = device.interval || 5;
+
+        const endTime = new Date(Date.now() + intervalSeconds * 1000);
+        const endTimeISO = endTime.toISOString();
+
+        console.log(`⚡ Trigger Activated! Sending ON for ${intervalSeconds} seconds`);
+
+        // Send ON command with duration
+        const success = publishCommand(device.deviceId, {
+            type: "COMMAND",
+            command: "ON",
+            eventId: `trigger-${device.deviceId}-${Date.now()}`,
+            durationSeconds: intervalSeconds,
+            endTime: endTimeISO
+        });
+
+        if (success) {
+            console.log(`✅ ON Command sent to ${device.deviceId} | Duration: ${intervalSeconds}s`);
+
+            // Schedule OFF command after interval
+            const offJobId = `trigger-off-${device.deviceId}-${Date.now()}`;
+
+            await scheduleQueue.add("trigger-off", {
+                deviceId: device.deviceId,
+                command: "OFF",
+                eventId: `trigger-${device.deviceId}`,
+                reason: "auto_interval"
+            }, {
+                delay: intervalSeconds * 1000,
+                jobId: offJobId,
+                attempts: 2,
+                removeOnComplete: true,
+                removeOnFail: true,
+                backoff: { type: 'exponential', delay: 1000 }
+            });
+
+            console.log(`📅 Auto OFF scheduled after ${intervalSeconds} seconds`);
+        }
+    } else {
+        console.log(`✅ No critical alerts for trigger device`);
+    }
+
+    await device.save();
+
+    // Send live data to frontend
+    const liveData = {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        deviceType: device.deviceType,
+        category: "trigger",
+        data: payload,
+        alerts: alerts,
+        interval: device.interval,
+        timestamp: new Date()
+    };
+
+    if (global.io) {
+        global.io.emit(`device/${device.deviceId}`, liveData);
+        console.log(`📤 Live data sent to frontend for trigger device: ${device.deviceId}`);
+    }
+
+    console.log(`✅ Trigger processing completed for ${device.deviceId}\n`);
+};
+
+module.exports = { processTriggerDeviceData };
