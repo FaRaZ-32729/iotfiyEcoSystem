@@ -533,6 +533,71 @@ const verifyOTP = async (req, res) => {
     }
 };
 
+// Resend OTP (for users who didn't verify in time)
+const resendOTP = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required"
+            });
+        }
+
+        const user = await User.findOne({ email: email.toLowerCase() });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({
+                success: false,
+                message: "Account is already verified"
+            });
+        }
+
+        // Generate new OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = otp;
+        user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        await user.save();
+
+        // Send new OTP Email
+        await sendEmail(
+            user.email,
+            "Your New Verification OTP - IoTify",
+            `
+            <h2>New Verification OTP</h2>
+            <p>Hello ${user.name},</p>
+            <p>Your new OTP is: <strong>${otp}</strong></p>
+            <p>This OTP will expire in 10 minutes.</p>
+            <p>If you didn't request this, please ignore this email.</p>
+            `
+        );
+
+        console.log(`✅ New OTP sent to ${user.email}`);
+
+        res.status(200).json({
+            success: true,
+            message: "New OTP has been sent to your email",
+            email: user.email
+        });
+
+    } catch (error) {
+        console.error("Resend OTP Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while resending OTP"
+        });
+    }
+};
+
 // Login
 const loginUser = async (req, res) => {
     try {
@@ -812,6 +877,7 @@ module.exports = {
     setPassword,
     registerAdmin,
     verifyOTP,
+    resendOTP,
     loginUser,
     logoutUser,
     createSubUser,
