@@ -6,6 +6,7 @@ const { connectMQTT } = require("./src/mqtt/mqttClient");
 const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
+require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
 
