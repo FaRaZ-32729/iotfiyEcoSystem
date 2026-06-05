@@ -6,7 +6,7 @@ const { connectMQTT } = require("./src/mqtt/mqttClient");
 const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
-require("dotenv").config();
+const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
 
@@ -24,7 +24,9 @@ const initializeMQTTForWorker = async () => {
 };
 
 initializeMQTTForWorker();
-
+console.log("REDIS_HOST =", process.env.REDIS_HOST);
+console.log("REDIS_PORT =", process.env.REDIS_PORT);
+console.log("REDIS_PASSWORD exists =", !!process.env.REDIS_PASSWORD);
 const scheduleWorker = new Worker("device-schedules", async (job) => {
 
     const { deviceId, command, eventId } = job.data;
