@@ -206,14 +206,22 @@ const shiftDays = (days) => {
 
 const manualToggle = async (req, res) => {
     try {
-        const { deviceId } = req.body;
+        const { deviceId, eventId } = req.body;
         const user = req.user;
+
+        console.log(req.body)
 
         if (!deviceId) {
             return res.status(400).json({ success: false, message: "deviceId is required" });
         }
 
+        if (!eventId) {
+            return res.status(400).json({ success: false, message: "eventId is required" });
+        }
+
         const device = await Device.findOne({ deviceId });
+
+
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
@@ -223,6 +231,16 @@ const manualToggle = async (req, res) => {
                 success: false,
                 message: "Device is offline. Cannot send command."
             });
+        }
+
+        const activeSchedule = await Event.findOne({
+            _id: eventId,
+            deviceId: deviceId,
+            status: "ACTIVE"
+        });
+
+        if (!activeSchedule) {
+            return res.status(400).json({ success: false, message: "No event found" });
         }
 
         const newCommand = device.state === "ON" ? "OFF" : "ON";
@@ -249,11 +267,11 @@ const manualToggle = async (req, res) => {
         const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
 
         // Find active schedule for today
-        const activeSchedule = await Event.findOne({
-            deviceId,
-            status: "ACTIVE",
-            days: { $in: [new Date().toLocaleString('en-US', { weekday: 'long' }).toLowerCase()] }
-        });
+        // const activeSchedule = await Event.findOne({
+        //     deviceId,
+        //     status: "ACTIVE",
+        //     days: { $in: [new Date().toLocaleString('en-US', { weekday: 'long' }).toLowerCase()] }
+        // });
 
         if (activeSchedule) {
             activeSchedule.manualOverride = true;
