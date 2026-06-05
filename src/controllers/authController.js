@@ -597,7 +597,7 @@ const logoutUser = async (req, res) => {
 // ==================== FORGOT PASSWORD ====================
 const forgotPassword = async (req, res) => {
     try {
-        const { email } = req.body;
+        let { email } = req.body;
         email = email.toLowerCase().trim();
 
         if (!email) {

@@ -21,7 +21,7 @@ const server = http.createServer(app);
 
 // Middlewares
 const allowedOrigins = [
-    "https://luckyone-iotfiysolutions.vercel.app",
+    "https://iotfiy-ecosystem.vercel.app",
     "http://localhost:5173"
 ];
 
@@ -40,8 +40,8 @@ app.use(cors({
 // Initialize Socket.io
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:5173", "https://your-frontend.com"],
-        methods: ["GET", "POST"],
+        origin: ["http://localhost:5173", "https://iotfiy-ecosystem.vercel.app"],
+        methods: ["GET", "POST" ,],
         credentials: true
     }
 });
