@@ -17,6 +17,8 @@ const reconcileMissedCommands = async (deviceId) => {
             timeZone: 'UTC'
         }).toLowerCase();
 
+        const today = now.toISOString().split('T')[0];
+
         console.log(`🔍 Reconciling at UTC ${currentTime} | Day: ${utcDay} | Device: ${deviceId}`);
 
         const schedules = await Schedule.find({
@@ -32,6 +34,11 @@ const reconcileMissedCommands = async (deviceId) => {
         let activeSchedule = null;
 
         for (const schedule of schedules) {
+
+            if (schedule.manualOverride && schedule.overrideDate === today) {
+                console.log(`⛔ Skipping reconciliation for ${deviceId} - Manual Override is active today`);
+                continue;
+            }
 
             if (schedule.isRecurring && schedule.status === "INACTIVE") {
                 console.log(`⛔ Skipping reconciliation for ${deviceId} - Recurring event is INACTIVE`);
