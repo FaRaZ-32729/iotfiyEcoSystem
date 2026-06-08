@@ -2,6 +2,9 @@
 const Subscription = require("../models/subscriptionModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
 const User = require("../models/userModel");
+const Organization = require("../models/organizationModel");
+const Venue = require("../models/venueModel");
+const Device = require("../models/deviceModel");
 const { purchaseSubscriptionSchema } = require("../validations/subscriptionValidations");
 const sendEmail = require("../services/emailServices");
 
@@ -128,7 +131,117 @@ const getMySubscription = async (req, res) => {
     }
 };
 
+// Get Subscription Usage / Limits Status
+const getSubscriptionUsage = async (req, res) => {
+    try {
+        const user = req.user;
+
+        if (!user.currentSubscription) {
+            return res.status(400).json({
+                success: false,
+                message: "No active subscription found"
+            });
+        }
+
+        // Populate subscription + plan
+        const subscription = await user.populate({
+            path: 'currentSubscription',
+            populate: { path: 'plan' }
+        });
+
+        const plan = subscription.currentSubscription?.plan;
+
+        if (!plan) {
+            return res.status(400).json({
+                success: false,
+                message: "Subscription plan details not found"
+            });
+        }
+
+        // ==================== CALCULATE USAGE FROM ACTUAL COLLECTIONS ====================
+
+        // 1. Organizations → Count from Organization collection using owner
+        const usedOrganizations = await Organization.countDocuments({
+            owner: user._id
+        });
+
+        // 2. Venues → Under user's organizations
+        const userOrgIds = await Organization.find({ owner: user._id }).select('_id');
+        const orgIds = userOrgIds.map(org => org._id);
+
+        const usedVenues = await Venue.countDocuments({
+            organization: { $in: orgIds }
+        });
+
+        // 3. Devices → Under user's venues
+        const userVenues = await Venue.find({
+            organization: { $in: orgIds }
+        }).select('_id');
+
+        const usedDevices = await Device.countDocuments({
+            venue: { $in: userVenues.map(v => v._id) }
+        });
+
+        // 4. Sub-Users (created by this manager)
+        const usedUsers = await User.countDocuments({
+            creatorId: user._id,
+            role: "user"
+        });
+
+        const usage = {
+            organizations: {
+                used: usedOrganizations,
+                total: plan.maxOrganizations,
+                remaining: Math.max(0, plan.maxOrganizations - usedOrganizations)
+            },
+            venues: {
+                used: usedVenues,
+                total: plan.maxVenues,
+                remaining: Math.max(0, plan.maxVenues - usedVenues)
+            },
+            devices: {
+                used: usedDevices,
+                total: plan.maxDevices,
+                remaining: Math.max(0, plan.maxDevices - usedDevices)
+            },
+            users: {
+                used: usedUsers,
+                total: plan.maxUsers || 10,
+                remaining: Math.max(0, (plan.maxUsers || 10) - usedUsers)
+            }
+        };
+
+        res.status(200).json({
+            success: true,
+            subscription: {
+                planName: plan.name,
+                planType: plan.type,
+                isActive: subscription.currentSubscription.status === "active",
+                startDate: subscription.currentSubscription.startDate,
+                endDate: subscription.currentSubscription.endDate
+            },
+            usage,
+            overallStatus: {
+                isWithinLimit:
+                    usedOrganizations <= plan.maxOrganizations &&
+                    usedVenues <= plan.maxVenues &&
+                    usedDevices <= plan.maxDevices &&
+                    usedUsers <= (plan.maxUsers || 10)
+            }
+        });
+
+    } catch (error) {
+        console.error("Get Subscription Usage Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while fetching usage"
+        });
+    }
+};
+
+
 module.exports = {
     purchaseSubscription,
+    getSubscriptionUsage,
     getMySubscription
 };
