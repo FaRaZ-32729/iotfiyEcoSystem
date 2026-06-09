@@ -1,5 +1,6 @@
 const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
+const { broadcastOTAProgress } = require("../services/otaProgressService");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
 const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
 const { processTriggerDeviceData } = require("../services/triggerProcessor");
@@ -58,12 +59,30 @@ const setupMessageHandler = (client) => {
                 return;
             }
 
+
+            // ==================== OTA PROGRESS UPDATES ====================
+            if (parts[3] === "ota") {
+                const payload = JSON.parse(message.toString());
+                const deviceId = parts[2];
+
+                console.log(`📡 OTA Progress from ${deviceId}: ${payload.progress}%`);
+
+                if (payload.sessionId && payload.progress !== undefined) {
+                    broadcastOTAProgress(payload.sessionId, deviceId, payload.progress);
+                }
+                return;
+            }
+
+            // ==================== REGULAR DATA MESSAGES ====================
             // Original code continues (only for /data topics)
-            const payload = JSON.parse(message.toString());
-            console.log(`\n📨 MQTT Message Received → Topic: ${topic}`);
+            // const payload = JSON.parse(message.toString());
+            // console.log(`\n📨 MQTT Message Received → Topic: ${topic}`);
 
             if (parts[1] === "devices" && parts[3] === "data") {
+                const payload = JSON.parse(message.toString());
                 const deviceId = parts[2];
+
+                console.log(`\n📨 MQTT Message Received → Topic: ${topic}`);
 
                 // Fetch device with full details
                 const device = await Device.findOne({ deviceId });

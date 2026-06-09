@@ -2,6 +2,9 @@
 const { bucket } = require("../config/firebaseAdmin");
 const OTA = require("../models/otaModel");
 const path = require("path");
+const { broadcastOTAProgress } = require("../services/otaProgressService");
+const { publishCommand } = require("../mqtt/commandPublisher");
+const Device = require("../models/deviceModel");
 
 const uploadOTAFile = async (req, res) => {
     try {
@@ -263,7 +266,7 @@ const startOTA = async (req, res) => {
             broadcastOTAProgress(sessionId, device.deviceId, 0);
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: `OTA update started for ${devices.length} devices`,
             sessionId,
@@ -276,8 +279,8 @@ const startOTA = async (req, res) => {
 
     } catch (error) {
         console.error("Start OTA Error:", error);
-        res.status(500).json({ success: false, message: "Failed to start OTA" });
+        return res.status(500).json({ success: false, message: "Failed to start OTA" });
     }
 };
 
-module.exports = { uploadOTAFile, deleteOTA, getOTAVersionsByDeviceType };
+module.exports = { uploadOTAFile, deleteOTA, getOTAVersionsByDeviceType, startOTA, activeOTASessions };
