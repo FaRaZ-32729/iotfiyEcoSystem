@@ -5,6 +5,7 @@ const { generateCron, isOvernight } = require("../queues/cronHelper");
 const { addScheduleJob } = require("../queues/scheduleService");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("../queues/scheduleQueue");
+const { reconcileMissedCommands } = require("../services/reconciliationService");
 
 // src/controllers/eventController.js
 
@@ -343,7 +344,18 @@ const toggleScheduleStatus = async (req, res) => {
         schedule.status = status;
         await schedule.save();
 
-        res.json({
+        let reconciliationTriggered = false;
+
+        // ==================== RECONCILIATION LOGIC ====================
+        if (status === "ACTIVE") {
+            console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
+
+            // Call reconciliation to check if we should send ON command immediately
+            await reconcileMissedCommands(schedule.deviceId);
+            reconciliationTriggered = true;
+        }
+
+        return res.json({
             success: true,
             message: `Schedule ${status.toLowerCase()} successfully`,
             schedule
@@ -351,7 +363,7 @@ const toggleScheduleStatus = async (req, res) => {
 
     } catch (error) {
         console.error("Toggle Schedule Status Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 

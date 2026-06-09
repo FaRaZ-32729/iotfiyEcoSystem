@@ -43,9 +43,12 @@ const setupMessageHandler = (client) => {
                         console.log(`📤 Emitted to Frontend → deviceStatusUpdate for ${deviceId}`);
                     }
 
-                    // ==================== RECONCILIATION LOGIC ====================
-                    if (newStatus === "online") {
+                    // ==================== RECONCILIATION ONLY FOR SCHEDULING DEVICES ====================
+                    if (newStatus === "online" && updatedDevice.category === "scheduling") {
+                        console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
                         await reconcileMissedCommands(deviceId);
+                    } else if (newStatus === "online") {
+                        console.log(`⏭️ No reconciliation needed for ${updatedDevice.category} device`);
                     }
 
                 } else {
