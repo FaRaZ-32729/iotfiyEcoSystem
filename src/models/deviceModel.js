@@ -53,6 +53,11 @@ const deviceSchema = new mongoose.Schema({
 
     apiKey: { type: String, required: true, unique: true },
 
+    version: {
+        type: String,
+        default: null
+    },
+
     // Common fields
     temperatureAlert: { type: Boolean, default: false },
     humidityAlert: { type: Boolean, default: false },
@@ -102,6 +107,7 @@ deviceSchema.pre('save', async function () {
         "lastUpdateTime",
         "status",
         "lastSeen",
+        "version",
         ...(allowedFields[type] || [])
     ];
 
@@ -144,6 +150,7 @@ deviceSchema.set('toJSON', {
             "lastUpdateTime",
             "state",
             "interval",
+            "version",
             ...(allowedFields[type] || [])
         ];
 

@@ -41,6 +41,7 @@ const connectMQTT = () => {
         // Subscribe to device topics
         client.subscribe("iotify/devices/+/data", { qos: 1 });
         client.subscribe("iotify/devices/+/status", { qos: 1 });
+        client.subscribe("iotify/devices/+/ota", { qos: 1 });
 
         console.log("✅ Subscribed to all device topics");
     });

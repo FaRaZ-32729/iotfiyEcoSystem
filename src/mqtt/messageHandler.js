@@ -1,3 +1,4 @@
+const { activeOTASessions } = require("../controllers/otaController");
 const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
 const { broadcastOTAProgress } = require("../services/otaProgressService");
@@ -60,15 +61,45 @@ const setupMessageHandler = (client) => {
             }
 
 
-            // ==================== OTA PROGRESS UPDATES ====================
+            // ==================== OTA PROGRESS & COMPLETION ====================
             if (parts[3] === "ota") {
-                const payload = JSON.parse(message.toString());
-                const deviceId = parts[2];
+                try {
+                    const payload = JSON.parse(message.toString());
+                    const deviceId = parts[2];
 
-                console.log(`📡 OTA Progress from ${deviceId}: ${payload.progress}%`);
+                    console.log(`📡 OTA Message from ${deviceId}: ${payload.type || 'PROGRESS'} | ${payload.progress || ''}%`);
 
-                if (payload.sessionId && payload.progress !== undefined) {
-                    broadcastOTAProgress(payload.sessionId, deviceId, payload.progress);
+                    if (payload.type === "OTA_PROGRESS" && payload.sessionId) {
+                        const progress = parseInt(payload.progress) || 0;
+                        broadcastOTAProgress(payload.sessionId, deviceId, progress, "downloading");
+                    }
+                    else if (payload.type === "OTA_COMPLETED" && payload.sessionId) {
+                        console.log(`🎉 OTA COMPLETED for device ${deviceId} | Session: ${payload.sessionId}`);
+
+                        // ==================== UPDATE DEVICE FIRMWARE VERSION ====================
+                        const updatedDevice = await Device.findOneAndUpdate(
+                            { deviceId: deviceId },
+                            {
+                                version: payload.version || "unknown",
+                                lastUpdateTime: new Date()
+                            },
+                            { new: true }
+                        );
+
+                        if (updatedDevice) {
+                            console.log(`✅ Firmware Version Updated → Device ${deviceId} = ${payload.version || 'unknown'}`);
+                        }
+
+                        broadcastOTAProgress(payload.sessionId, deviceId, 100, "completed");
+
+                        // Optional: Session cleanup
+                        if (activeOTASessions.has(payload.sessionId)) {
+                            activeOTASessions.delete(payload.sessionId);
+                            console.log(`🗑️ OTA Session closed: ${payload.sessionId}`);
+                        }
+                    }
+                } catch (parseErr) {
+                    console.error("❌ OTA Message Parse Error:", parseErr);
                 }
                 return;
             }
