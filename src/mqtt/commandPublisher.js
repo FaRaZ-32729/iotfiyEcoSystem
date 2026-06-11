@@ -11,12 +11,14 @@ const publishCommand = (deviceId, commandPayload) => {
 
     const topic = `iotify/commands/${deviceId}/control`;
 
+    const commandName = commandPayload.command || commandPayload.type || "UNKNOWN";
+    
     client.publish(topic, JSON.stringify(commandPayload), { qos: 1, retain: false }, (err) => {
         if (err) {
             console.error(`Failed to publish command to ${deviceId}:`, err);
             return false;
         } else {
-            console.log(`✅ Command sent to device ${deviceId} → ${commandPayload.command}`);
+            console.log(`✅ Command sent to device ${deviceId} → ${commandName}`);
         }
     });
 

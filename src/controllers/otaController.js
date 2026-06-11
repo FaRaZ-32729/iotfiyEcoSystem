@@ -2,9 +2,9 @@
 const { bucket } = require("../config/firebaseAdmin");
 const OTA = require("../models/otaModel");
 const path = require("path");
-const { broadcastOTAProgress } = require("../services/otaProgressService");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const Device = require("../models/deviceModel");
+const { broadcastOTAProgress, setActiveSessions } = require("../services/otaProgressService");
 
 const uploadOTAFile = async (req, res) => {
     try {
@@ -199,6 +199,120 @@ const deleteOTA = async (req, res) => {
 };
 
 const activeOTASessions = new Map(); // sessionId -> session data
+setActiveSessions(activeOTASessions);
+
+// const startOTA = async (req, res) => {
+//     try {
+//         const { otaId, deviceIds } = req.body;
+//         const user = req.user;
+
+//         if (!otaId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "otaId and deviceIds array are required"
+//             });
+//         }
+
+//         const ota = await OTA.findById(otaId);
+//         if (!ota) {
+//             return res.status(404).json({ success: false, message: "OTA version not found" });
+//         }
+
+//         // Get valid online devices of matching deviceType
+//         const devices = await Device.find({
+//             _id: { $in: deviceIds },
+//             deviceType: ota.deviceType,
+//             status: "online"
+//         }).select("deviceId deviceName state");
+
+//         if (devices.length === 0) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "No online devices found matching the OTA device type"
+//             });
+//         }
+
+//         const sessionId = `ota-${otaId}-${Date.now()}`;
+
+//         const sessionData = {
+//             sessionId,
+//             otaId: ota._id,
+//             version: ota.version,
+//             fileUrl: ota.fileUrl,
+//             totalDevices: devices.length,
+//             completed: 0,
+//             failed: 0,
+//             progressMap: new Map(), // deviceId -> percentage (0-100)
+//             startedAt: new Date()
+//         };
+
+//         activeOTASessions.set(sessionId, sessionData);
+
+//         console.log(`🚀 OTA Session Started: ${sessionId} | ${devices.length} devices`);
+
+//         // Send OTA command to each device
+//         for (const device of devices) {
+//             sessionData.progressMap.set(device.deviceId, 0);
+
+//             // publishCommand(device.deviceId, {
+//             //     type: "OTA_START",
+//             //     message: "hellow faraz",
+//             //     version: ota.version,
+//             //     // fileUrl: ota.fileUrl,
+//             //     fileUrl: "https://google.comfaraz1234567",
+//             //     fileSize: ota.fileSize,
+//             //     sessionId: sessionId,
+//             //     timestamp: new Date().toISOString()
+//             // });
+//             publishCommand(device.deviceId, {
+//                 type: "OTA_START",
+//                 otaId: ota._id.toString(),        // ← Send only ID
+//                 version: ota.version,
+//                 sessionId: sessionId,
+//                 timestamp: new Date().toISOString()
+//             });
+
+//             // Initial progress broadcast
+//             broadcastOTAProgress(sessionId, device.deviceId, 0);
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: `OTA update started for ${devices.length} devices`,
+//             sessionId,
+//             totalDevices: devices.length,
+//             devices: devices.map(d => ({
+//                 deviceId: d.deviceId,
+//                 deviceName: d.deviceName
+//             }))
+//         });
+
+//     } catch (error) {
+//         console.error("Start OTA Error:", error);
+//         return res.status(500).json({ success: false, message: "Failed to start OTA" });
+//     }
+// };
+
+// const getOTADownloadUrl = async (req, res) => {
+//     console.log("hitting the download apis")
+//     try {
+//         const { otaId } = req.params;
+
+//         const ota = await OTA.findById(otaId);
+//         if (!ota) {
+//             return res.status(404).json({ success: false, message: "OTA not found" });
+//         }
+//         if (ota.fileUrl) {
+//             console.log(`🔄 Redirecting to file: ${ota.fileUrl}`);
+//             return res.redirect(302, ota.fileUrl);
+//         }
+
+//         res.status(404).json({ success: false, message: "File URL not found" });
+
+//     } catch (error) {
+//         res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
 
 const startOTA = async (req, res) => {
     try {
@@ -206,10 +320,7 @@ const startOTA = async (req, res) => {
         const user = req.user;
 
         if (!otaId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "otaId and deviceIds array are required"
-            });
+            return res.status(400).json({ success: false, message: "otaId and deviceIds array are required" });
         }
 
         const ota = await OTA.findById(otaId);
@@ -217,7 +328,6 @@ const startOTA = async (req, res) => {
             return res.status(404).json({ success: false, message: "OTA version not found" });
         }
 
-        // Get valid online devices of matching deviceType
         const devices = await Device.find({
             _id: { $in: deviceIds },
             deviceType: ota.deviceType,
@@ -225,50 +335,51 @@ const startOTA = async (req, res) => {
         }).select("deviceId deviceName state");
 
         if (devices.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "No online devices found matching the OTA device type"
-            });
+            return res.status(400).json({ success: false, message: "No online devices found" });
         }
 
         const sessionId = `ota-${otaId}-${Date.now()}`;
 
+        // Session Data with better tracking
         const sessionData = {
             sessionId,
-            otaId: ota._id,
+            otaId: ota._id.toString(),
             version: ota.version,
             fileUrl: ota.fileUrl,
             totalDevices: devices.length,
             completed: 0,
             failed: 0,
-            progressMap: new Map(), // deviceId -> percentage (0-100)
+            progressMap: new Map(),           // deviceId -> progress %
+            statusMap: new Map(),             // deviceId -> "pending" | "downloading" | "completed" | "failed"
             startedAt: new Date()
         };
+
+        // Initialize each device
+        devices.forEach(device => {
+            sessionData.progressMap.set(device.deviceId, 0);
+            sessionData.statusMap.set(device.deviceId, "pending");
+        });
 
         activeOTASessions.set(sessionId, sessionData);
 
         console.log(`🚀 OTA Session Started: ${sessionId} | ${devices.length} devices`);
 
-        // Send OTA command to each device
+        // Send command to each device
         for (const device of devices) {
-            sessionData.progressMap.set(device.deviceId, 0);
-
             publishCommand(device.deviceId, {
                 type: "OTA_START",
+                otaId: ota._id.toString(),
                 version: ota.version,
-                fileUrl: ota.fileUrl,
-                fileSize: ota.fileSize,
                 sessionId: sessionId,
                 timestamp: new Date().toISOString()
             });
 
-            // Initial progress broadcast
-            broadcastOTAProgress(sessionId, device.deviceId, 0);
+            broadcastOTAProgress(sessionId, device.deviceId, 0, "pending");
         }
 
         return res.status(200).json({
             success: true,
-            message: `OTA update started for ${devices.length} devices`,
+            message: `OTA started for ${devices.length} devices`,
             sessionId,
             totalDevices: devices.length,
             devices: devices.map(d => ({
@@ -283,4 +394,48 @@ const startOTA = async (req, res) => {
     }
 };
 
-module.exports = { uploadOTAFile, deleteOTA, getOTAVersionsByDeviceType, startOTA, activeOTASessions };
+const getOTADownloadUrl = async (req, res) => {
+    console.log("ota download api hitted");
+    try {
+        const { otaId } = req.params;
+
+        const ota = await OTA.findById(otaId);
+        if (!ota || !ota.storagePath) {
+            return res.status(404).json({ success: false, message: "OTA file not found" });
+        }
+
+        console.log(`🔄 Proxying OTA file: ${ota.storagePath}`);
+
+        const file = bucket.file(ota.storagePath);
+
+        // Get Metadata (File Size)
+        const [metadata] = await file.getMetadata();
+
+        // Set Headers
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="${ota.fileName}"`);
+        res.setHeader('Content-Length', metadata.size);   // ← Yeh sahi se set ho raha hai
+
+        console.log(`📦 File Size from Firebase: ${metadata.size} bytes`);
+
+        const stream = file.createReadStream();
+
+        stream.on('error', (error) => {
+            console.error("Firebase Stream Error:", error);
+            if (!res.headersSent) {
+                res.status(500).json({ success: false, message: "Download failed" });
+            }
+        });
+
+        stream.pipe(res);
+
+    } catch (error) {
+        console.error("Proxy Download Error:", error);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, message: "Server error" });
+        }
+    }
+};
+
+
+module.exports = { uploadOTAFile, deleteOTA, getOTAVersionsByDeviceType, startOTA, activeOTASessions, getOTADownloadUrl };
