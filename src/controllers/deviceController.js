@@ -4,6 +4,7 @@ const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const { createDeviceSchema, updateDeviceSchema } = require("../validations/deviceValidation");
 const { publishCommand } = require("../mqtt/commandPublisher");
+const Organization = require("../models/organizationModel");
 
 // Helper function to generate API Key
 const generateApiKey = (deviceId) => {
@@ -178,6 +179,134 @@ const getSingleDevice = async (req, res) => {
         return res.status(200).json({ success: true, device });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ==================== GET ALL DEVICES BY VERSION ====================
+const getDevicesByVersion = async (req, res) => {
+    try {
+        const { version } = req.params;
+
+        if (!version) {
+            return res.status(400).json({
+                success: false,
+                message: "Version is required"
+            });
+        }
+
+        const devices = await Device.find({
+            version: version
+        }).select("deviceId deviceName deviceType category status state version lastSeen venue")
+            .populate("venue", "name");
+
+        if (devices.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `No devices found with firmware version "${version}"`
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            version: version,
+            totalDevices: devices.length,
+            devices: devices
+        });
+
+    } catch (error) {
+        console.error("Get Devices By Version Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while fetching devices"
+        });
+    }
+};
+
+// ==================== GET MY DEVICES (Role-wise) ====================
+const getMyDevices = async (req, res) => {
+    try {
+        const user = req.user;
+        let devices = [];
+
+        if (user.role === "admin") {
+            devices = await Device.find()
+                .populate("venue", "name")
+                .populate({
+                    path: "venue",
+                    populate: { path: "organization", select: "name" }
+                })
+                .select("deviceId deviceName deviceType category status state firmwareVersion lastSeen venue");
+
+        }
+        else if (user.role === "manager") {
+            const organizations = await Organization.find({
+                owner: user._id
+            }).select("_id");
+
+            const organizationIds = organizations.map(org => org._id);
+
+            if (organizationIds.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    role: "manager",
+                    total: 0,
+                    message: "No organizations found for this manager",
+                });
+            }
+
+            devices = await Device.find({
+                venue: {
+                    $in: await Venue.find({
+                        organization: { $in: organizationIds }
+                    }).select("_id")
+                }
+            })
+                .populate("venue", "name")
+                .populate({
+                    path: "venue",
+                    populate: {
+                        path: "organization",
+                        select: "name owner"
+                    }
+                })
+                .select("deviceId deviceName deviceType category status state firmwareVersion lastSeen venue");
+        }
+        else if (user.role === "user") {
+            if (!user.venues || user.venues.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    role: "user",
+                    total: 0,
+                    message: "No venues assigned to you",
+                });
+            }
+
+            const venueIds = user.venues.map(v => v.venueId);
+
+            devices = await Device.find({
+                venue: { $in: venueIds }
+            })
+                .populate("venue", "name")
+                .populate({
+                    path: "venue",
+                    populate: { path: "organization", select: "name" }
+                })
+                .select("deviceId deviceName deviceType category status state firmwareVersion lastSeen venue");
+        }
+
+        return res.status(200).json({
+            success: true,
+            role: user.role,
+            total: devices.length,
+            devices: devices
+        });
+
+    } catch (error) {
+        console.error("Get My Devices Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while fetching devices"
+        });
     }
 };
 
@@ -361,4 +490,4 @@ const manualButtonForTriggerDevice = async (req, res) => {
     }
 };
 
-module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice, manualButtonForTriggerDevice };
+module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice, manualButtonForTriggerDevice, getDevicesByVersion, getMyDevices };
