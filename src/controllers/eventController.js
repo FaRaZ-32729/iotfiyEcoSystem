@@ -111,99 +111,100 @@ const shiftDays = (days) => {
     });
 };
 
-// const createSchedule = async (req, res) => {
-//     try {
-//         const { deviceId, startTime, endTime, days, command = "ON" } = req.body;
-//         const user = req.user;
+// Get Current/Next Schedule
+const getCurrentOrNextScheduleData = async (deviceId) => {
+    try {
+        const now = new Date();
+        
+        // Current UTC Time (HH:mm)
+        const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+        
+        // Current UTC Day
+        const currentDay = now.toLocaleString('en-US', { 
+            weekday: 'long', 
+            timeZone: 'UTC' 
+        }).toLowerCase();
 
-//         // Validation
-//         if (!deviceId || !startTime || !endTime || !days || days.length === 0) {
-//             return res.status(400).json({ success: false, message: "Missing required fields" });
-//         }
+        console.log(`🔍 Checking schedule for device ${deviceId} | Time: ${currentTime} | Day: ${currentDay}`);
 
-//         const device = await Device.findOne({ deviceId });
-//         if (!device) {
-//             return res.status(404).json({ success: false, message: "Device not found" });
-//         }
+        // Get all active schedules for this device
+        const schedules = await Event.find({
+            deviceId: deviceId,
+            status: "ACTIVE"
+        }).sort({ startTime: 1 });   // Sort by start time
 
-//         if (device.category !== "scheduling") {
-//             return res.status(403).json({ success: false, message: "Only scheduling devices allowed" });
-//         }
+        let currentEvent = null;
+        let nextEvent = null;
+        let closestNextTime = null;
 
-//         const overnight = isOvernight(startTime, endTime);
+        for (const sch of schedules) {
+            const { startTime, endTime, days, isOvernight, isRecurring } = sch;
 
-//         // Generate Cron Expressions
-//         const startCron = generateCron(startTime, days);
-//         let endDays = [...days];
+            // Skip if this schedule is not for today (for recurring)
+            if (isRecurring && !days.includes(currentDay)) {
+                continue;
+            }
 
-//         if (overnight) {    
-//             const dayOrder = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-//             endDays = days.map(d => {
-//                 const idx = dayOrder.indexOf(d.toLowerCase().trim());
-//                 return dayOrder[(idx + 1) % 7];
-//             });
-//         }
+            // ==================== CHECK IF CURRENTLY ACTIVE ====================
+            let isActiveNow = false;
 
-//         const endCron = generateCron(endTime, endDays);
+            if (!isOvernight) {
+                // Normal Schedule
+                if (currentTime >= startTime && currentTime < endTime) {
+                    isActiveNow = true;
+                }
+            } else {
+                // Overnight Schedule (e.g., 22:00 → 02:00)
+                if (currentTime >= startTime || currentTime < endTime) {
+                    isActiveNow = true;
+                }
+            }
 
-//         console.log(`📅 New Schedule → Start: ${startCron} | End: ${endCron} | Overnight: ${overnight}`);
+            if (isActiveNow) {
+                currentEvent = sch;
+                break;   // First active event is current
+            }
 
-//         // Unique Job IDs
-//         const startJobId = `start-${deviceId}-${Date.now()}`;
-//         const endJobId = `end-${deviceId}-${Date.now()}`;
+            // ==================== FIND NEXT EVENT ====================
+            if (!currentEvent) {
+                // Compare start time for next event
+                if (currentTime < startTime) {
+                    if (!nextEvent || startTime < closestNextTime) {
+                        nextEvent = sch;
+                        closestNextTime = startTime;
+                    }
+                }
+            }
+        }
 
-//         // Add ON Job
-//         await addScheduleJob(startJobId, {
-//             scheduleId: startJobId,
-//             deviceId,
-//             command: "ON",
-//             type: "start",
-//             startTime: startTime,     // ← Add this
-//             endTime: endTime          // ← Add this
-//         }, startCron);
+        // Return result
+        if (currentEvent) {
+            return {
+                type: "CURRENT",
+                event: currentEvent
+            };
+        } else if (nextEvent) {
+            return {
+                type: "NEXT",
+                event: nextEvent
+            };
+        } else {
+            return {
+                type: "NO_EVENT",
+                event: null,
+                message: "No active or upcoming schedule found"
+            };
+        }
 
-//         // Add OFF Job
-//         await addScheduleJob(endJobId, {
-//             scheduleId: endJobId,
-//             deviceId,
-//             command: "OFF",
-//             type: "end",
-//             startTime: startTime,     // ← Add this
-//             endTime: endTime          // ← Add this
-//         }, endCron);
-
-
-//         console.log("Start Job Added with Cron:", startCron);
-//         console.log("End Job Added with Cron:", endCron);
-
-//         // Save to Database
-//         const schedule = await Event.create({
-//             deviceId,
-//             startTime,
-//             endTime,
-//             days,
-//             command,
-//             isOvernight: overnight,
-//             startCron,
-//             endCron,
-//             startJobId,
-//             endJobId,
-//             createdBy: user._id,
-//             status: "ACTIVE"
-//         });
-
-//         res.status(201).json({
-//             success: true,
-//             message: "Schedule created successfully",
-//             schedule
-//         });
-
-//     } catch (error) {
-//         console.error("Create Schedule Error:", error);
-//         res.status(500).json({ success: false, message: error.message });
-//     }
-// };
-
+    } catch (err) {
+        console.error("Get Current/Next Schedule Error:", err);
+        return { 
+            type: "NO_EVENT", 
+            event: null,
+            message: "Error fetching schedule"
+        };
+    }
+};
 
 const manualToggle = async (req, res) => {
     try {
@@ -411,4 +412,4 @@ const deleteSchedule = async (req, res) => {
 };
 
 
-module.exports = { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule };
+module.exports = { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule, getCurrentOrNextScheduleData };

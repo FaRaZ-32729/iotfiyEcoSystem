@@ -1,3 +1,4 @@
+const { getCurrentOrNextScheduleData } = require("../controllers/eventController");
 const { activeOTASessions } = require("../controllers/otaController");
 const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
@@ -39,16 +40,60 @@ const setupMessageHandler = (client) => {
                             deviceId: deviceId,
                             status: newStatus,
                             lastSeen: new Date(),
-                            deviceName: updatedDevice.deviceName || "Unknown"
+                            // deviceName: updatedDevice.deviceName || "Unknown"
                         });
 
                         console.log(`📤 Emitted to Frontend → deviceStatusUpdate for ${deviceId}`);
                     }
 
+                    if (newStatus === "online") {
+                        // Device online hai → Current/Next schedule bhejo
+                        const scheduleData = await getCurrentOrNextScheduleData(deviceId);
+                        if (global.io) {
+                            global.io.emit(`device/${deviceId}/schedule`, scheduleData);
+                            console.log(`📡 Sent current/next schedule for ONLINE device ${deviceId}`);
+                        }
+                    }
+                    else {
+                        // Device offline ho gaya → Last known schedule bhejo with offline flag
+                        const lastScheduleData = await getCurrentOrNextScheduleData(deviceId);
+
+                        const offlineScheduleData = {
+                            ...lastScheduleData,
+                            deviceStatus: "offline",
+                            message: "Device is currently offline. Showing last known schedule."
+                        };
+
+                        if (global.io) {
+                            global.io.emit(`device/${deviceId}/schedule`, offlineScheduleData);
+                            console.log(`📡 Sent last known schedule for OFFLINE device ${deviceId}`);
+                        }
+                    }
+
                     // ==================== RECONCILIATION ONLY FOR SCHEDULING DEVICES ====================
-                    if (newStatus === "online" && updatedDevice.category === "scheduling") {
-                        console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
-                        await reconcileMissedCommands(deviceId);
+                    // if (newStatus === "online" && updatedDevice.category === "scheduling") {
+                    //     console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
+                    //     await reconcileMissedCommands(deviceId);
+                    // }
+                    // ==================== ONLY FOR SCHEDULING DEVICES ====================
+                    if (updatedDevice.category === "scheduling") {
+
+                        // Send Current/Next Schedule
+                        const scheduleData = await getCurrentOrNextScheduleData(deviceId);
+
+                        if (global.io) {
+                            global.io.emit(`device/${deviceId}/schedule`, {
+                                ...scheduleData,
+                                deviceStatus: newStatus
+                            });
+                            console.log(`📡 Sent current/next schedule for Scheduling device ${deviceId} | Status: ${newStatus}`);
+                        }
+
+                        // Reconciliation only when device comes ONLINE
+                        if (newStatus === "online") {
+                            console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
+                            await reconcileMissedCommands(deviceId);
+                        }
                     } else if (newStatus === "online") {
                         console.log(`⏭️ No reconciliation needed for ${updatedDevice.category} device`);
                     }
