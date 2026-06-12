@@ -112,49 +112,129 @@ const shiftDays = (days) => {
 };
 
 // Get Current/Next Schedule
+// const getCurrentOrNextScheduleData = async (deviceId) => {
+//     try {
+//         const now = new Date();
+
+//         // Current UTC Time (HH:mm)
+//         const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+
+//         // Current UTC Day
+//         const currentDay = now.toLocaleString('en-US', { 
+//             weekday: 'long', 
+//             timeZone: 'UTC' 
+//         }).toLowerCase();
+
+//         console.log(`🔍 Checking schedule for device ${deviceId} | Time: ${currentTime} | Day: ${currentDay}`);
+
+//         // Get all active schedules for this device
+//         const schedules = await Event.find({
+//             deviceId: deviceId,
+//             status: "ACTIVE"
+//         }).sort({ startTime: 1 });   // Sort by start time
+
+//         let currentEvent = null;
+//         let nextEvent = null;
+//         let closestNextTime = null;
+
+//         for (const sch of schedules) {
+//             const { startTime, endTime, days, isOvernight, isRecurring } = sch;
+
+//             // Skip if this schedule is not for today (for recurring)
+//             if (isRecurring && !days.includes(currentDay)) {
+//                 continue;
+//             }
+
+//             // ==================== CHECK IF CURRENTLY ACTIVE ====================
+//             let isActiveNow = false;
+
+//             if (!isOvernight) {
+//                 // Normal Schedule
+//                 if (currentTime >= startTime && currentTime < endTime) {
+//                     isActiveNow = true;
+//                 }
+//             } else {
+//                 // Overnight Schedule (e.g., 22:00 → 02:00)
+//                 if (currentTime >= startTime || currentTime < endTime) {
+//                     isActiveNow = true;
+//                 }
+//             }
+
+//             if (isActiveNow) {
+//                 currentEvent = sch;
+//                 break;   // First active event is current
+//             }
+
+//             // ==================== FIND NEXT EVENT ====================
+//             if (!currentEvent) {
+//                 // Compare start time for next event
+//                 if (currentTime < startTime) {
+//                     if (!nextEvent || startTime < closestNextTime) {
+//                         nextEvent = sch;
+//                         closestNextTime = startTime;
+//                     }
+//                 }
+//             }
+//         }
+
+//         // Return result
+//         if (currentEvent) {
+//             return {
+//                 type: "CURRENT",
+//                 event: currentEvent
+//             };
+//         } else if (nextEvent) {
+//             return {
+//                 type: "NEXT",
+//                 event: nextEvent
+//             };
+//         } else {
+//             return {
+//                 type: "NO_EVENT",
+//                 event: null,
+//                 message: "No active or upcoming schedule found"
+//             };
+//         }
+
+//     } catch (err) {
+//         console.error("Get Current/Next Schedule Error:", err);
+//         return { 
+//             type: "NO_EVENT", 
+//             event: null,
+//             message: "Error fetching schedule"
+//         };
+//     }
+// };
 const getCurrentOrNextScheduleData = async (deviceId) => {
     try {
         const now = new Date();
-        
-        // Current UTC Time (HH:mm)
+
         const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
-        
-        // Current UTC Day
-        const currentDay = now.toLocaleString('en-US', { 
-            weekday: 'long', 
-            timeZone: 'UTC' 
+        const currentDay = now.toLocaleString('en-US', {
+            weekday: 'long',
+            timeZone: 'UTC'
         }).toLowerCase();
 
-        console.log(`🔍 Checking schedule for device ${deviceId} | Time: ${currentTime} | Day: ${currentDay}`);
-
-        // Get all active schedules for this device
         const schedules = await Event.find({
             deviceId: deviceId,
             status: "ACTIVE"
-        }).sort({ startTime: 1 });   // Sort by start time
+        }).sort({ startTime: 1 });
 
         let currentEvent = null;
         let nextEvent = null;
-        let closestNextTime = null;
 
         for (const sch of schedules) {
             const { startTime, endTime, days, isOvernight, isRecurring } = sch;
 
-            // Skip if this schedule is not for today (for recurring)
-            if (isRecurring && !days.includes(currentDay)) {
-                continue;
-            }
+            if (isRecurring && !days.includes(currentDay)) continue;
 
-            // ==================== CHECK IF CURRENTLY ACTIVE ====================
             let isActiveNow = false;
 
             if (!isOvernight) {
-                // Normal Schedule
                 if (currentTime >= startTime && currentTime < endTime) {
                     isActiveNow = true;
                 }
             } else {
-                // Overnight Schedule (e.g., 22:00 → 02:00)
                 if (currentTime >= startTime || currentTime < endTime) {
                     isActiveNow = true;
                 }
@@ -162,33 +242,57 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
 
             if (isActiveNow) {
                 currentEvent = sch;
-                break;   // First active event is current
-            }
-
-            // ==================== FIND NEXT EVENT ====================
-            if (!currentEvent) {
-                // Compare start time for next event
-                if (currentTime < startTime) {
-                    if (!nextEvent || startTime < closestNextTime) {
-                        nextEvent = sch;
-                        closestNextTime = startTime;
-                    }
+                break;
+            } else if (!currentEvent && currentTime < startTime) {
+                if (!nextEvent || startTime < nextEvent.startTime) {
+                    nextEvent = sch;
                 }
             }
         }
 
-        // Return result
+        // ==================== HELPER: Calculate Total Duration ====================
+        const calculateTotalDuration = (startTime, endTime) => {
+            const [startH, startM] = startTime.split(':').map(Number);
+            const [endH, endM] = endTime.split(':').map(Number);
+
+            let duration = (endH * 60 + endM) - (startH * 60 + startM);
+            if (duration < 0) duration += 24 * 60;   // Overnight case
+            return duration;
+        };
+
+        // ==================== RETURN DATA ====================
         if (currentEvent) {
+            const totalDuration = calculateTotalDuration(currentEvent.startTime, currentEvent.endTime);
+
+            // Remaining time
+            const [endHour, endMinute] = currentEvent.endTime.split(':').map(Number);
+            let endDate = new Date(Date.UTC(
+                now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), endHour, endMinute, 0
+            ));
+            if (endDate <= now) endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+            const remainingMinutes = Math.floor((endDate - now) / (1000 * 60));
+
             return {
                 type: "CURRENT",
-                event: currentEvent
+                event: currentEvent,
+                totalDurationMinutes: totalDuration,
+                totalDurationText: `${Math.floor(totalDuration / 60)}h ${totalDuration % 60}m`,
+                remainingMinutes: remainingMinutes,
+                remainingText: `${remainingMinutes} min remaining`
             };
-        } else if (nextEvent) {
+        }
+        else if (nextEvent) {
+            const totalDuration = calculateTotalDuration(nextEvent.startTime, nextEvent.endTime);
+
             return {
                 type: "NEXT",
-                event: nextEvent
+                event: nextEvent,
+                totalDurationMinutes: totalDuration,
+                totalDurationText: `${Math.floor(totalDuration / 60)}h ${totalDuration % 60}m`
             };
-        } else {
+        }
+        else {
             return {
                 type: "NO_EVENT",
                 event: null,
@@ -198,8 +302,8 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
 
     } catch (err) {
         console.error("Get Current/Next Schedule Error:", err);
-        return { 
-            type: "NO_EVENT", 
+        return {
+            type: "NO_EVENT",
             event: null,
             message: "Error fetching schedule"
         };
