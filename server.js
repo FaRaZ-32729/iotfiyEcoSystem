@@ -9,11 +9,13 @@ const { Server } = require("socket.io");
 
 // Routers
 const centeralRoutes = require("./src/routers/centeralRoutes");
+const { multiDBConnections } = require("./src/config/multiDBs");
 
 // Utilities
-
 dotenv.config();
 dbConnection();
+multiDBConnections();
+
 
 const port = process.env.PORT || 5054;
 const app = express();
@@ -41,7 +43,7 @@ app.use(cors({
 const io = new Server(server, {
     cors: {
         origin: ["http://localhost:5173", "https://iotfiy-ecosystem.vercel.app"],
-        methods: ["GET", "POST" ,],
+        methods: ["GET", "POST",],
         credentials: true
     }
 });

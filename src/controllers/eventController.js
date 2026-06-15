@@ -310,24 +310,108 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
     }
 };
 
+// const manualToggle = async (req, res) => {
+//     try {
+//         const { deviceId, eventId } = req.body;
+//         const user = req.user;
+
+//         console.log(req.body)
+
+//         if (!deviceId) {
+//             return res.status(400).json({ success: false, message: "deviceId is required" });
+//         }
+
+//         if (!eventId) {
+//             return res.status(400).json({ success: false, message: "eventId is required" });
+//         }
+
+//         const device = await Device.findOne({ deviceId });
+
+
+//         if (!device) {
+//             return res.status(404).json({ success: false, message: "Device not found" });
+//         }
+
+//         if (device.status !== "online") {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Device is offline. Cannot send command."
+//             });
+//         }
+
+//         const activeSchedule = await Event.findOne({
+//             _id: eventId,
+//             deviceId: deviceId,
+//             status: "ACTIVE"
+//         });
+
+//         if (!activeSchedule) {
+//             return res.status(400).json({ success: false, message: "No event found" });
+//         }
+
+//         const newCommand = device.state === "ON" ? "OFF" : "ON";
+
+//         console.log(`🔧 Manual Toggle: ${device.state} → ${newCommand} for ${deviceId}`);
+
+//         // Send command
+//         const success = publishCommand(deviceId, {
+//             type: "COMMAND",
+//             command: newCommand,
+//             isManual: true,
+//             timestamp: new Date().toISOString()
+//         });
+
+//         if (!success) {
+//             return res.status(500).json({ success: false, message: "Failed to send command" });
+//         }
+
+//         // Update device state immediately
+//         device.state = newCommand;
+//         await device.save();
+
+//         // ==================== OVERRIDE LOGIC ====================
+//         const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
+
+//         // Find active schedule for today
+//         // const activeSchedule = await Event.findOne({
+//         //     deviceId,
+//         //     status: "ACTIVE",
+//         //     days: { $in: [new Date().toLocaleString('en-US', { weekday: 'long' }).toLowerCase()] }
+//         // });
+
+//         if (activeSchedule) {
+//             activeSchedule.manualOverride = true;
+//             activeSchedule.overrideDate = today;
+//             await activeSchedule.save();
+
+//             console.log(`🚫 Manual override activated for schedule ${activeSchedule._id} today`);
+//         }
+
+//         res.json({
+//             success: true,
+//             message: `Device manually turned ${newCommand}`,
+//             newState: newCommand,
+//             deviceId
+//         });
+
+//     } catch (error) {
+//         console.error("Manual Toggle Error:", error);
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
+
+// ==================== GET EVENTS BY DEVICE ID ====================
+
 const manualToggle = async (req, res) => {
     try {
         const { deviceId, eventId } = req.body;
         const user = req.user;
 
-        console.log(req.body)
-
         if (!deviceId) {
             return res.status(400).json({ success: false, message: "deviceId is required" });
         }
 
-        if (!eventId) {
-            return res.status(400).json({ success: false, message: "eventId is required" });
-        }
-
         const device = await Device.findOne({ deviceId });
-
-
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
@@ -339,21 +423,11 @@ const manualToggle = async (req, res) => {
             });
         }
 
-        const activeSchedule = await Event.findOne({
-            _id: eventId,
-            deviceId: deviceId,
-            status: "ACTIVE"
-        });
-
-        if (!activeSchedule) {
-            return res.status(400).json({ success: false, message: "No event found" });
-        }
-
         const newCommand = device.state === "ON" ? "OFF" : "ON";
 
         console.log(`🔧 Manual Toggle: ${device.state} → ${newCommand} for ${deviceId}`);
 
-        // Send command
+        // Send command to device
         const success = publishCommand(deviceId, {
             type: "COMMAND",
             command: newCommand,
@@ -369,29 +443,35 @@ const manualToggle = async (req, res) => {
         device.state = newCommand;
         await device.save();
 
-        // ==================== OVERRIDE LOGIC ====================
-        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
+        // ==================== MANUAL OVERRIDE LOGIC (Only if eventId is provided) ====================
+        if (eventId) {
+            const activeSchedule = await Event.findOne({
+                _id: eventId,
+                deviceId: deviceId,
+                status: "ACTIVE"
+            });
 
-        // Find active schedule for today
-        // const activeSchedule = await Event.findOne({
-        //     deviceId,
-        //     status: "ACTIVE",
-        //     days: { $in: [new Date().toLocaleString('en-US', { weekday: 'long' }).toLowerCase()] }
-        // });
+            if (activeSchedule) {
+                const today = new Date().toISOString().split('T')[0];
 
-        if (activeSchedule) {
-            activeSchedule.manualOverride = true;
-            activeSchedule.overrideDate = today;
-            await activeSchedule.save();
+                activeSchedule.manualOverride = true;
+                activeSchedule.overrideDate = today;
+                await activeSchedule.save();
 
-            console.log(`🚫 Manual override activated for schedule ${activeSchedule._id} today`);
+                console.log(`🚫 Manual override activated for schedule ${activeSchedule._id} today`);
+            } else {
+                console.warn(`⚠️ Event ${eventId} not found or not active for manual override`);
+            }
+        } else {
+            console.log(`ℹ️ No eventId provided → Only device state toggled (no manual override)`);
         }
 
-        res.json({
+        return res.json({
             success: true,
             message: `Device manually turned ${newCommand}`,
             newState: newCommand,
-            deviceId
+            deviceId,
+            eventOverrideApplied: !!eventId
         });
 
     } catch (error) {
@@ -400,7 +480,6 @@ const manualToggle = async (req, res) => {
     }
 };
 
-// ==================== GET EVENTS BY DEVICE ID ====================
 const getEventsByDevice = async (req, res) => {
     try {
         const { deviceId } = req.params;
