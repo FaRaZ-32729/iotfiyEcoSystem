@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+require("dotenv").config();
 
 const connections = {};
 
@@ -6,6 +7,13 @@ const connections = {};
 const multiDBConnections = () => {
     const options = {
         maxPoolSize: 10,
+        serverSelectionTimeoutMS: 20000,
+        socketTimeoutMS: 60000,
+        connectTimeoutMS: 20000,
+        retryWrites: true,
+        w: "majority",
+        tls: true,
+        tlsAllowInvalidCertificates: false,
     };
 
     connections["OD"] = mongoose.createConnection(process.env.MONGODB_OD_URL, options);
@@ -35,7 +43,7 @@ const getDBConnection = (deviceType) => {
         console.warn(`No cluster configured for deviceType: ${deviceType}. Data will be ignored.`);
         return null;
     }
-    
+
     return conn;
 };
 
