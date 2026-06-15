@@ -11,8 +11,6 @@ router.post("/create", authenticate, checkManagePermission(), createSchedule);
 router.post("/manual-toggle", authenticate, manualToggle);
 // here you have to use deviceId to get events of a device 
 router.get("/get/:deviceId", getEventsByDevice);
-// currnet or next event
-router.get("/current-next/:deviceId", authenticate, getCurrentOrNextScheduleData);
 // here you have to use _id of the event
 router.patch("/:id/status", toggleScheduleStatus);
 // here you have to use _id of the event
