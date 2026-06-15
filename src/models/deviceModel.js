@@ -148,19 +148,26 @@ deviceSchema.set('toJSON', {
             "conditions", "apiKey",
             "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
             "lastUpdateTime",
-            "state",
+            "status",
             "interval",
             "version",
             ...(allowedFields[type] || [])
         ];
 
-        if (category !== "trigger") {
-            delete ret.interval;
-            delete ret.manualButton;
+        // if (category !== "trigger") {
+        //     delete ret.interval;
+        //     delete ret.manualButton;
+        // }
+        if (category === "trigger") {
+            keepFields.push("manualButton");
+            keepFields.push("interval");
         }
 
-        if (category !== "scheduling" || category !== "trigger") {
-            delete ret.state;
+        // if (category !== "scheduling" || category !== "trigger") {
+        //     keepFields.push("state");
+        // }
+        if (category === "scheduling" || category === "trigger") {
+            keepFields.push("state");
         }
 
         Object.keys(ret).forEach(key => {
