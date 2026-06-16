@@ -1,6 +1,7 @@
 // src/services/processors/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 const scheduleQueue = require("../queues/scheduleQueue");
+const sensorModel = require("../models/sensorModel");
 
 const processSchedulingDeviceData = async (device, payload) => {
     console.log(`\n📡 Processing SCHEDULING Data for Device: ${device.deviceName} (${device.deviceId})`);
@@ -66,6 +67,28 @@ const processSchedulingDeviceData = async (device, payload) => {
 
     // Save to database
     await device.save();
+
+    // ==================== SAVE TO CORRECT CLUSTER ====================
+    try {
+        const SensorModel = sensorModel(device.deviceType);
+        if (SensorModel) {
+            await SensorModel.create({
+                deviceId: device.deviceId,
+                deviceType: device.deviceType,
+                timestamp: new Date(),
+                temperature: payload.temperature,
+                humidity: payload.humidity,
+                odour: payload.odour,
+                AQI: payload.AQI,
+                gass: payload.gass,
+                voltage: payload.voltage,
+                current: payload.current,
+            });
+            console.log(`💾 Sensor data saved in ${device.deviceType} Cluster`);
+        }
+    } catch (err) {
+        console.error(`❌ Failed to save sensor data for ${device.deviceType}:`, err.message);
+    }
 
     // Prepare data to send to frontend
     const liveData = {

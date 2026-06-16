@@ -1,4 +1,5 @@
 // src/services/processors/monitoringProcessor.js
+const sensorModel = require("../models/sensorModel");
 const checkConditions = require("./conditionChecker");
 
 const processMonitoringDeviceData = async (device, payload) => {
@@ -54,6 +55,47 @@ const processMonitoringDeviceData = async (device, payload) => {
 
     // Save to database
     await device.save();
+
+    // ==================== SAVE SENSOR DATA TO CORRECT CLUSTER ====================
+    // ==================== SAVE SENSOR DATA (Filtered) ====================
+    try {
+        const SensorModel = sensorModel(device.deviceType);
+
+        if (SensorModel) {
+            const sensorData = {
+                deviceId: device.deviceId,
+                deviceType: device.deviceType,
+                timestamp: new Date(),
+            };
+
+            // Device Type ke hisab se fields add karo
+            if (device.deviceType === "OD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.odour = payload.odour;
+            }
+            else if (device.deviceType === "THD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+            }
+            else if (device.deviceType === "AQID") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.AQI = payload.AQI;
+            }
+            else if (device.deviceType === "ED") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.voltage = payload.voltage;
+                sensorData.current = payload.current;
+            }
+
+            await SensorModel.create(sensorData);
+            console.log(`💾 Sensor data saved in ${device.deviceType} Cluster`);
+        }
+    } catch (err) {
+        console.error(`❌ Failed to save sensor data for ${device.deviceType}:`, err.message);
+    }
 
     // Prepare data to send to frontend
     const liveData = {
