@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const authenticate = require("../middlewares/auth");
 const checkManagePermission = require("../middlewares/checkPermission");
-const { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule, getCurrentOrNextScheduleData } = require("../controllers/eventController");
+const { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule } = require("../controllers/eventController");
 
 
 router.post("/create", authenticate, checkManagePermission(), createSchedule);

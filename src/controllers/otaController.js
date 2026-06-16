@@ -15,7 +15,7 @@ const uploadOTAFile = async (req, res) => {
             });
         }
 
-        const { version, deviceType, notes } = req.body;
+        const { version, deviceType, } = req.body;
         const user = req.user;
 
         if (!version || !deviceType) {
@@ -118,7 +118,7 @@ const getOTAVersionsByDeviceType = async (req, res) => {
 
         const otas = await OTA.find({ deviceType })
             .sort({ createdAt: -1 })
-            .select('version fileName fileUrl storagePath deviceType isActive fileSize notes createdAt');
+            .select('version fileName fileUrl storagePath deviceType isActive fileSize createdAt');
         // .populate('uploadedBy', 'name email')
 
         if (otas.length === 0) {

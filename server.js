@@ -9,11 +9,12 @@ const { Server } = require("socket.io");
 
 // Routers
 const centeralRoutes = require("./src/routers/centeralRoutes");
+const { multiDBConnections } = require("./src/config/multiDBs");
 
 // Utilities
 dotenv.config();
 dbConnection();
-// multiDBConnections();
+multiDBConnections();
 
 
 const port = process.env.PORT || 5054;
