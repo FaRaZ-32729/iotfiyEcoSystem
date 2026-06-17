@@ -68,22 +68,40 @@ const processSchedulingDeviceData = async (device, payload) => {
     // Save to database
     await device.save();
 
-    // ==================== SAVE TO CORRECT CLUSTER ====================
+    // ==================== SAVE SENSOR DATA ====================
     try {
         const SensorModel = sensorModel(device.deviceType);
+
         if (SensorModel) {
-            await SensorModel.create({
+            const sensorData = {
                 deviceId: device.deviceId,
                 deviceType: device.deviceType,
                 timestamp: new Date(),
-                temperature: payload.temperature,
-                humidity: payload.humidity,
-                odour: payload.odour,
-                AQI: payload.AQI,
-                gass: payload.gass,
-                voltage: payload.voltage,
-                current: payload.current,
-            });
+            };
+
+            // save fields a/c deviceType
+            if (device.deviceType === "OD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.odour = payload.odour;
+            }
+            else if (device.deviceType === "THD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+            }
+            else if (device.deviceType === "AQID") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.AQI = payload.AQI;
+            }
+            else if (device.deviceType === "ED") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.voltage = payload.voltage;
+                sensorData.current = payload.current;
+            }
+
+            await SensorModel.create(sensorData);
             console.log(`💾 Sensor data saved in ${device.deviceType} Cluster`);
         }
     } catch (err) {

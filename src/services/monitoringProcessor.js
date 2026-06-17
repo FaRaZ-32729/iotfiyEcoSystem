@@ -56,8 +56,7 @@ const processMonitoringDeviceData = async (device, payload) => {
     // Save to database
     await device.save();
 
-    // ==================== SAVE SENSOR DATA TO CORRECT CLUSTER ====================
-    // ==================== SAVE SENSOR DATA (Filtered) ====================
+    // ==================== SAVE SENSOR DATA ====================
     try {
         const SensorModel = sensorModel(device.deviceType);
 
@@ -68,7 +67,7 @@ const processMonitoringDeviceData = async (device, payload) => {
                 timestamp: new Date(),
             };
 
-            // Device Type ke hisab se fields add karo
+            // save fields a/c deviceType
             if (device.deviceType === "OD") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;
