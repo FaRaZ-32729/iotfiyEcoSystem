@@ -2,7 +2,7 @@
 const Device = require("../models/deviceModel");
 const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
-const { createDeviceSchema, updateDeviceSchema } = require("../validations/deviceValidation");
+const { createDeviceSchema, updateDeviceSchema, alertAccess } = require("../validations/deviceValidation");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const Organization = require("../models/organizationModel");
 
@@ -66,11 +66,77 @@ const createDevice = async (req, res) => {
             });
         }
 
-        // Auto generate Device ID
+        // Auto generate Device ID & API Key
         const deviceId = await generateDeviceId();
-
-        // Generate API Key
         const apiKey = generateApiKey(deviceId);
+
+        // ==================== ALERT ACCESS CONFIG (FLAT FIELDS) ====================
+        let alertAccessConfig = {};
+
+        if (validatedData.category === "trigger") {
+            // Default: All false
+            alertAccessConfig = {
+                tempAlertAccess: false,
+                humiAlertAccess: false,
+                odourAlertAccess: false,
+                aqiAlertAccess: false,
+                glAlertAccess: false,
+                voltageAlertAccess: false,
+                currentAlertAccess: false,
+            };
+
+            // Flat fields ko directly pick karo
+            if (typeof validatedData.tempAlertAccess === "boolean") {
+                alertAccessConfig.tempAlertAccess = validatedData.tempAlertAccess;
+            }
+            if (typeof validatedData.humiAlertAccess === "boolean") {
+                alertAccessConfig.humiAlertAccess = validatedData.humiAlertAccess;
+            }
+            if (typeof validatedData.odourAlertAccess === "boolean") {
+                alertAccessConfig.odourAlertAccess = validatedData.odourAlertAccess;
+            }
+            if (typeof validatedData.aqiAlertAccess === "boolean") {
+                alertAccessConfig.aqiAlertAccess = validatedData.aqiAlertAccess;
+            }
+            if (typeof validatedData.glAlertAccess === "boolean") {
+                alertAccessConfig.glAlertAccess = validatedData.glAlertAccess;
+            }
+            if (typeof validatedData.voltageAlertAccess === "boolean") {
+                alertAccessConfig.voltageAlertAccess = validatedData.voltageAlertAccess;
+            }
+            if (typeof validatedData.currentAlertAccess === "boolean") {
+                alertAccessConfig.currentAlertAccess = validatedData.currentAlertAccess;
+            }
+
+            // Device Type wise unnecessary fields ko false kar do
+            const dt = validatedData.deviceType;
+            if (dt === "OD") {
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "THD") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "AQID") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "GLD") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "ED") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+            }
+        }
 
         // Create Device
         const device = await Device.create({
@@ -80,7 +146,8 @@ const createDevice = async (req, res) => {
             category: validatedData.category,
             venue: validatedData.venueId,
             conditions: validatedData.conditions,
-            apiKey
+            apiKey,
+            ...alertAccessConfig
         });
 
         res.status(201).json({
@@ -92,7 +159,14 @@ const createDevice = async (req, res) => {
                 deviceName: device.deviceName,
                 deviceType: device.deviceType,
                 category: device.category,
-                apiKey: device.apiKey
+                apiKey: device.apiKey,
+                tempAlertAccess: device.tempAlertAccess,
+                humiAlertAccess: device.humiAlertAccess,
+                odourAlertAccess: device.odourAlertAccess,
+                aqiAlertAccess: device.aqiAlertAccess,
+                glAlertAccess: device.glAlertAccess,
+                voltageAlertAccess: device.voltageAlertAccess,
+                currentAlertAccess: device.currentAlertAccess,
             }
         });
 
@@ -115,6 +189,85 @@ const createDevice = async (req, res) => {
         });
     }
 };
+
+// const createDevice = async (req, res) => {
+//     try {
+//         // Validate with Zod
+//         const validatedData = createDeviceSchema.parse(req.body);
+
+//         // Check venue exists
+//         const venue = await Venue.findById(validatedData.venueId);
+//         if (!venue) {
+//             return res.status(404).json({ success: false, message: "Venue not found" });
+//         }
+
+//         // Subscription limit check for non-admins
+//         if (req.user.role !== "admin") {
+//             await checkSubscriptionLimit("device")(req, res, () => { });
+//             if (res.headersSent) return;
+//         }
+
+//         // Check duplicate deviceName in same venue
+//         const existingName = await Device.findOne({
+//             deviceName: { $regex: new RegExp(`^${validatedData.deviceName}$`, 'i') },
+//             venue: validatedData.venueId
+//         });
+//         if (existingName) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Device name already exists in this venue"
+//             });
+//         }
+
+//         // Auto generate Device ID
+//         const deviceId = await generateDeviceId();
+
+//         // Generate API Key
+//         const apiKey = generateApiKey(deviceId);
+
+//         // Create Device
+//         const device = await Device.create({
+//             deviceId,
+//             deviceName: validatedData.deviceName,
+//             deviceType: validatedData.deviceType,
+//             category: validatedData.category,
+//             venue: validatedData.venueId,
+//             conditions: validatedData.conditions,
+//             apiKey
+//         });
+
+//         res.status(201).json({
+//             success: true,
+//             message: "Device created successfully",
+//             device: {
+//                 id: device._id,
+//                 deviceId: device.deviceId,
+//                 deviceName: device.deviceName,
+//                 deviceType: device.deviceType,
+//                 category: device.category,
+//                 apiKey: device.apiKey
+//             }
+//         });
+
+//     } catch (error) {
+//         if (error.name === "ZodError") {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Validation failed",
+//                 errors: error.issues.map(err => ({
+//                     field: err.path[0],
+//                     message: err.message
+//                 }))
+//             });
+//         }
+
+//         console.error("Create Device Error:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Server error while creating device"
+//         });
+//     }
+// };
 
 // ==================== GET ALL DEVICES ====================
 const getAllDevices = async (req, res) => {
@@ -322,7 +475,7 @@ const updateDevice = async (req, res) => {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
 
-        // Permission Check
+        // Permission Check (as it is rakha hai)
         // const venue = await Venue.findById(device.venue);
         // const org = await Organization.findById(venue.organization);
 
@@ -349,12 +502,39 @@ const updateDevice = async (req, res) => {
             }
         }
 
-        // Update fields
+        // ==================== ALERT ACCESS UPDATE (Only for Trigger) ====================
+        if (validatedData.category === "trigger" || device.category === "trigger") {
+            // Update alert access fields if provided
+            if (typeof validatedData.tempAlertAccess === "boolean") {
+                device.tempAlertAccess = validatedData.tempAlertAccess;
+            }
+            if (typeof validatedData.humiAlertAccess === "boolean") {
+                device.humiAlertAccess = validatedData.humiAlertAccess;
+            }
+            if (typeof validatedData.odourAlertAccess === "boolean") {
+                device.odourAlertAccess = validatedData.odourAlertAccess;
+            }
+            if (typeof validatedData.aqiAlertAccess === "boolean") {
+                device.aqiAlertAccess = validatedData.aqiAlertAccess;
+            }
+            if (typeof validatedData.glAlertAccess === "boolean") {
+                device.glAlertAccess = validatedData.glAlertAccess;
+            }
+            if (typeof validatedData.voltageAlertAccess === "boolean") {
+                device.voltageAlertAccess = validatedData.voltageAlertAccess;
+            }
+            if (typeof validatedData.currentAlertAccess === "boolean") {
+                device.currentAlertAccess = validatedData.currentAlertAccess;
+            }
+        }
+
+        // Update fields (as it is)
         if (validatedData.deviceName) device.deviceName = validatedData.deviceName;
         if (validatedData.deviceType) device.deviceType = validatedData.deviceType;
         if (validatedData.category) device.category = validatedData.category;
         if (validatedData.venueId) device.venue = validatedData.venueId;
         if (validatedData.conditions) device.conditions = validatedData.conditions;
+        if (validatedData.interval !== undefined) device.interval = validatedData.interval;
 
         await device.save();
 
@@ -368,13 +548,81 @@ const updateDevice = async (req, res) => {
         if (error.name === "ZodError") {
             return res.status(400).json({
                 success: false,
-                errors: error.issues
+                message: "Validation failed",
+                errors: error.issues.map(err => ({
+                    field: err.path[0],
+                    message: err.message
+                }))
             });
         }
         console.error(error);
         return res.status(500).json({ success: false, message: "Server error" });
     }
 };
+// const updateDevice = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const validatedData = updateDeviceSchema.parse(req.body);
+//         const user = req.user;
+
+//         const device = await Device.findById(id);
+//         if (!device) {
+//             return res.status(404).json({ success: false, message: "Device not found" });
+//         }
+
+//         // Permission Check
+//         // const venue = await Venue.findById(device.venue);
+//         // const org = await Organization.findById(venue.organization);
+
+//         // if (user.role !== "admin" && org.owner.toString() !== user._id.toString()) {
+//         //     return res.status(403).json({
+//         //         success: false,
+//         //         message: "You don't have permission to update this device"
+//         //     });
+//         // }
+
+//         // If changing venue
+//         if (validatedData.venueId && validatedData.venueId !== device.venue.toString()) {
+//             const newVenue = await Venue.findById(validatedData.venueId);
+//             if (!newVenue) {
+//                 return res.status(404).json({ success: false, message: "New venue not found" });
+//             }
+
+//             const newOrg = await Organization.findById(newVenue.organization);
+//             if (user.role !== "admin" && newOrg.owner.toString() !== user._id.toString()) {
+//                 return res.status(403).json({
+//                     success: false,
+//                     message: "You don't have access to the new venue's organization"
+//                 });
+//             }
+//         }
+
+//         // Update fields
+//         if (validatedData.deviceName) device.deviceName = validatedData.deviceName;
+//         if (validatedData.deviceType) device.deviceType = validatedData.deviceType;
+//         if (validatedData.category) device.category = validatedData.category;
+//         if (validatedData.venueId) device.venue = validatedData.venueId;
+//         if (validatedData.conditions) device.conditions = validatedData.conditions;
+
+//         await device.save();
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Device updated successfully",
+//             device
+//         });
+
+//     } catch (error) {
+//         if (error.name === "ZodError") {
+//             return res.status(400).json({
+//                 success: false,
+//                 errors: error.issues
+//             });
+//         }
+//         console.error(error);
+//         return res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
 
 // ==================== DELETE DEVICE ====================
 const deleteDevice = async (req, res) => {
