@@ -2,7 +2,7 @@
 const Event = require("../models/eventModel");
 const Device = require("../models/deviceModel");
 const { generateCron, isOvernight } = require("../queues/cronHelper");
-const { addScheduleJob } = require("../queues/scheduleService");
+const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("../queues/scheduleQueue");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
@@ -60,8 +60,8 @@ const createSchedule = async (req, res) => {
             }
         }
 
-        const startJobId = `start-${deviceId}-${Date.now()}`;
-        const endJobId = `end-${deviceId}-${Date.now()}`;
+        // const startJobId = `start-${deviceId}-${Date.now()}`;
+        // const endJobId = `end-${deviceId}-${Date.now()}`;
 
 
         const schedule = await Event.create({
@@ -77,6 +77,9 @@ const createSchedule = async (req, res) => {
             createdBy: user._id,
             status: "ACTIVE"
         });
+
+        const startJobId = `schedule-start-${deviceId}-${schedule._id.toString()}`;
+        const endJobId = `schedule-end-${deviceId}-${schedule._id.toString()}`;
 
         // Add jobs
         await addScheduleJob(startJobId, { deviceId, command: "ON", type: "start", startTime, endTime, days, eventId: schedule._id.toString(), isRecurring }, startCron);
@@ -205,6 +208,7 @@ const shiftDays = (days) => {
 //         };
 //     }
 // };
+
 const getCurrentOrNextScheduleData = async (deviceId) => {
     try {
         const now = new Date();
@@ -561,27 +565,37 @@ const deleteSchedule = async (req, res) => {
             return res.status(404).json({ success: false, message: "Schedule not found" });
         }
 
-        // Remove repeatable jobs from BullMQ
-        if (schedule.startJobId) {
-            try {
-                await scheduleQueue.removeRepeatableByKey(schedule.startJobId);
-                console.log(`🗑️ Removed start job from Redis: ${schedule.startJobId}`);
-            } catch (e) {
-                console.warn(`Could not remove startJobId: ${schedule.startJobId}`);
-            }
-        }
+        // Remove jobs from Redis/Queue
+        const startJobId = `schedule-start-${schedule.deviceId}-${schedule._id}`;
+        const endJobId = `schedule-end-${schedule.deviceId}-${schedule._id}`;
 
-        if (schedule.endJobId) {
-            try {
-                await scheduleQueue.removeRepeatableByKey(schedule.endJobId);
-                console.log(`🗑️ Removed end job from Redis: ${schedule.endJobId}`);
-            } catch (e) {
-                console.warn(`Could not remove endJobId: ${schedule.endJobId}`);
-            }
-        }
+        await removeScheduleJob(startJobId);
+        await removeScheduleJob(endJobId);
 
         // Delete from MongoDB
-        await Event.deleteOne({ _id: id });
+        await Event.findByIdAndDelete(id);
+
+        // // Remove repeatable jobs from BullMQ
+        // if (schedule.startJobId) {
+        //     try {
+        //         await scheduleQueue.removeRepeatableByKey(schedule.startJobId);
+        //         console.log(`🗑️ Removed start job from Redis: ${schedule.startJobId}`);
+        //     } catch (e) {
+        //         console.warn(`Could not remove startJobId: ${schedule.startJobId}`);
+        //     }
+        // }
+
+        // if (schedule.endJobId) {
+        //     try {
+        //         await scheduleQueue.removeRepeatableByKey(schedule.endJobId);
+        //         console.log(`🗑️ Removed end job from Redis: ${schedule.endJobId}`);
+        //     } catch (e) {
+        //         console.warn(`Could not remove endJobId: ${schedule.endJobId}`);
+        //     }
+        // }
+
+        // // Delete from MongoDB
+        // await Event.deleteOne({ _id: id });
 
         res.json({
             success: true,

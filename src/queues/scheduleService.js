@@ -60,14 +60,7 @@ const scheduleQueue = require("./scheduleQueue");
 //     }
 // };
 
-// const removeScheduleJob = async (jobId) => {
-//     try {
-//         await scheduleQueue.removeRepeatableByKey(jobId);
-//         console.log(`🗑️ Removed schedule job: ${jobId}`);
-//     } catch (error) {
-//         console.error(`Failed to remove job ${jobId}:`, error);
-//     }
-// };
+
 const addScheduleJob = async (jobId, data, cronExpression) => {
     try {
         const now = new Date();
@@ -139,6 +132,16 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
     }
 };
 
+const removeScheduleJob = async (jobId) => {
+    try {
+        await scheduleQueue.removeRepeatableByKey(jobId);
+        console.log(`🗑️ Removed schedule job: ${jobId}`);
+    } catch (error) {
+        console.error(`Failed to remove job ${jobId}:`, error);
+    }
+};
+
 module.exports = {
-    addScheduleJob
+    addScheduleJob,
+    removeScheduleJob
 };
