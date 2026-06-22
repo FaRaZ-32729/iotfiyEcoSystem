@@ -48,6 +48,8 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         return { skipped: true, reason: "manual_button_enabled" };
     }
 
+    let durationSeconds = null;
+
     // ==================== TRIGGER SCHEDULE CHECK ====================
     if (device.category === "trigger") {
         const triggerEvent = await TriggerSchedule.findOne({
@@ -56,19 +58,24 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         });
 
         if (triggerEvent && triggerEvent.status === "INACTIVE") {
-            console.log(`⛔ Skipping command ${command} for Trigger Device ${deviceId} - Event is INACTIVE`);
+            console.log(`⛔ Skipping command for Trigger Device ${deviceId} - Event INACTIVE`);
             return { skipped: true, reason: "inactive_trigger_event" };
         }
 
-        console.log(`✅ Trigger Event is ACTIVE → Proceeding with command`);
+        // Calculate duration from intervalSeconds
+        if (triggerEvent && triggerEvent.intervalSeconds) {
+            durationSeconds = triggerEvent.intervalSeconds;
+            console.log(`⏱️ Trigger Device ${deviceId} → Duration: ${durationSeconds} seconds`);
+        }
     }
 
+    // ==================== SCHEDULING DEVICE LOGIC ====================
 
     const schedule = await Event.findOne({
         _id: eventId,
         deviceId: deviceId,
-    })
-    console.log("event", schedule)
+    });
+
     if (schedule && schedule.isRecurring && schedule.status === "INACTIVE") {
         console.log(`⛔ Skipping command ${command} for ${deviceId} - Recurring event is INACTIVE`);
         return { skipped: true, reason: "inactive_recurring" };
@@ -85,9 +92,9 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     console.log(`   Device: ${deviceId} | Command: ${command}`);
 
     // ==================== CALCULATE REMAINING SECONDS ====================
-    let durationSeconds = null;
 
-    if (command === "ON" && schedule.endTime) {
+
+    if (command === "ON" && schedule && schedule.endTime) {
         const now = new Date();
         const currentHour = now.getUTCHours();
         const currentMinute = now.getUTCMinutes();

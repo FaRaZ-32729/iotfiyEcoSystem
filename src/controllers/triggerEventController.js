@@ -5,6 +5,152 @@ const { generateCron } = require("../queues/cronHelper");
 const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
 
 // ==================== CREATE TRIGGER EVENT ====================
+// const createTriggerSchedule = async (req, res) => {
+//     try {
+//         const { deviceId, startTime, days = [] } = req.body;
+//         const user = req.user;
+
+//         if (!deviceId || !startTime) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "deviceId and startTime are required"
+//             });
+//         }
+
+//         // Check device exists and is Trigger type
+//         const device = await Device.findOne({ deviceId });
+//         if (!device || device.category !== "trigger") {
+//             return res.status(403).json({
+//                 success: false,
+//                 message: "Invalid or non-trigger device"
+//             });
+//         }
+
+//         const intervalSeconds = device.interval || 5;
+
+//         // // Calculate endTime = startTime + interval
+//         // const [hours, minutes] = startTime.split(":").map(Number);
+//         // let endHours = hours;
+//         // let endMinutes = minutes + intervalSeconds;
+//         // let isOvernight = false;
+
+//         // // Proper overnight calculation
+//         // if (endMinutes >= 60) {
+//         //     endHours += Math.floor(endMinutes / 60);
+//         //     endMinutes = endMinutes % 60;
+
+//         //     // Agar endHours 24 ya usse zyada ho gaya to overnight hai
+//         //     if (endHours >= 24) {
+//         //         isOvernight = true;
+//         //         endHours = endHours % 24;
+//         //     }
+//         // }
+
+//         // const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+
+//         // ==================== CALCULATE endTime (in SECONDS) ====================
+//         const [startHours, startMinutes] = startTime.split(":").map(Number);
+
+//         let totalMinutes = startHours * 60 + startMinutes;
+//         totalMinutes += Math.floor(intervalSeconds / 60);   // Convert seconds to minutes
+//         let extraSeconds = intervalSeconds % 60;           // Remaining seconds (for logging)
+
+//         let endHours = Math.floor(totalMinutes / 60);
+//         let endMinutes = totalMinutes % 60;
+
+//         let isOvernight = false;
+
+//         if (endHours >= 24) {
+//             isOvernight = true;
+//             endHours = endHours % 24;
+//         }
+
+//         const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+
+//         console.log(`⏱️ Trigger Event Created: ${startTime} + ${intervalSeconds} seconds → ${endTime} (Overnight: ${isOvernight})`);
+
+//         const isRecurring = days.length > 0;
+
+//         let startCron, endCron;
+
+//         if (isRecurring) {
+//             // ==================== RECURRING SCHEDULE ====================
+//             startCron = generateCron(startTime, days);
+
+//             let endDays = isOvernight ? shiftDays(days) : [...days];   // Overnight logic
+//             endCron = generateCron(endTime, endDays);
+
+//             console.log(`🔄 Recurring Trigger Schedule: ${startTime} → ${endTime} | Overnight: ${isOvernight}`);
+
+//         } else {
+//             // ==================== ONE-TIME SCHEDULE (Today) ====================
+//             const now = new Date();
+//             const utcDayName = now.toLocaleString('en-US', {
+//                 weekday: 'long',
+//                 timeZone: 'UTC'
+//             }).toLowerCase();
+
+//             startCron = generateCron(startTime, [utcDayName]);
+
+//             if (isOvernight) {
+//                 const nextDayName = getNextDayName(utcDayName);
+//                 endCron = generateCron(endTime, [nextDayName]);
+//                 console.log(`🌙 One-time Overnight Trigger: ${utcDayName} ${startTime} → ${nextDayName} ${endTime}`);
+//             } else {
+//                 endCron = generateCron(endTime, [utcDayName]);
+//                 console.log(`📅 One-time Trigger: ${utcDayName} ${startTime} → ${endTime}`);
+//             }
+//         }
+
+//         const schedule = await TriggerSchedule.create({
+//             deviceId,
+//             startTime,
+//             endTime,
+//             days: isRecurring ? days : [],
+//             intervalSeconds,
+//             command: "ON",
+//             createdBy: user._id,
+//             status: "ACTIVE",
+//             isRecurring,
+//             isOvernight,
+//             startCron,
+//             endCron
+//         });
+
+//         // Add jobs to queue
+//         const startJobId = `trigger-start-${deviceId}-${schedule._id.toString()}`;
+//         const endJobId = `trigger-end-${deviceId}-${schedule._id.toString()}`;
+
+//         await addScheduleJob(startJobId, {
+//             deviceId,
+//             command: "ON",
+//             type: "start",
+//             eventId: schedule._id.toString(),
+//             isRecurring
+//         }, startCron);
+
+//         await addScheduleJob(endJobId, {
+//             deviceId,
+//             command: "OFF",
+//             type: "end",
+//             eventId: schedule._id.toString(),
+//             isRecurring
+//         }, endCron);
+
+//         res.status(201).json({
+//             success: true,
+//             message: `${isRecurring ? "Recurring" : "One-time"} trigger event created successfully`,
+//             schedule,
+//             isOvernight,
+//             isRecurring
+//         });
+
+//     } catch (error) {
+//         console.error("Create Trigger event Error:", error);
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
+
 const createTriggerSchedule = async (req, res) => {
     try {
         const { deviceId, startTime, days = [] } = req.body;
@@ -17,7 +163,6 @@ const createTriggerSchedule = async (req, res) => {
             });
         }
 
-        // Check device exists and is Trigger type
         const device = await Device.findOne({ deviceId });
         if (!device || device.category !== "trigger") {
             return res.status(403).json({
@@ -27,126 +172,73 @@ const createTriggerSchedule = async (req, res) => {
         }
 
         const intervalSeconds = device.interval || 5;
-
-        // // Calculate endTime = startTime + interval
-        // const [hours, minutes] = startTime.split(":").map(Number);
-        // let endHours = hours;
-        // let endMinutes = minutes + intervalSeconds;
-        // let isOvernight = false;
-
-        // // Proper overnight calculation
-        // if (endMinutes >= 60) {
-        //     endHours += Math.floor(endMinutes / 60);
-        //     endMinutes = endMinutes % 60;
-
-        //     // Agar endHours 24 ya usse zyada ho gaya to overnight hai
-        //     if (endHours >= 24) {
-        //         isOvernight = true;
-        //         endHours = endHours % 24;
-        //     }
-        // }
-
-        // const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
-
-        // ==================== CALCULATE endTime (in SECONDS) ====================
-        const [startHours, startMinutes] = startTime.split(":").map(Number);
-        
-        let totalMinutes = startHours * 60 + startMinutes;
-        totalMinutes += Math.floor(intervalSeconds / 60);   // Convert seconds to minutes
-        let extraSeconds = intervalSeconds % 60;           // Remaining seconds (for logging)
-
-        let endHours = Math.floor(totalMinutes / 60);
-        let endMinutes = totalMinutes % 60;
-
-        let isOvernight = false;
-
-        if (endHours >= 24) {
-            isOvernight = true;
-            endHours = endHours % 24;
-        }
-
-        const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
-
-        console.log(`⏱️ Trigger Event Created: ${startTime} + ${intervalSeconds} seconds → ${endTime} (Overnight: ${isOvernight})`);
-
         const isRecurring = days.length > 0;
 
-        let startCron, endCron;
+        let startCron = null;
 
         if (isRecurring) {
-            // ==================== RECURRING SCHEDULE ====================
             startCron = generateCron(startTime, days);
-
-            let endDays = isOvernight ? shiftDays(days) : [...days];   // Overnight logic
-            endCron = generateCron(endTime, endDays);
-
-            console.log(`🔄 Recurring Trigger Schedule: ${startTime} → ${endTime} | Overnight: ${isOvernight}`);
-
+            console.log(`🔄 Recurring Trigger Schedule: ${startTime} every ${days.join(', ')}`);
         } else {
-            // ==================== ONE-TIME SCHEDULE (Today) ====================
-            const now = new Date();
-            const utcDayName = now.toLocaleString('en-US', {
-                weekday: 'long',
-                timeZone: 'UTC'
-            }).toLowerCase();
-
-            startCron = generateCron(startTime, [utcDayName]);
-
-            if (isOvernight) {
-                const nextDayName = getNextDayName(utcDayName);
-                endCron = generateCron(endTime, [nextDayName]);
-                console.log(`🌙 One-time Overnight Trigger: ${utcDayName} ${startTime} → ${nextDayName} ${endTime}`);
-            } else {
-                endCron = generateCron(endTime, [utcDayName]);
-                console.log(`📅 One-time Trigger: ${utcDayName} ${startTime} → ${endTime}`);
-            }
+            console.log(`📅 One-time Trigger Schedule: ${startTime}`);
         }
 
         const schedule = await TriggerSchedule.create({
             deviceId,
             startTime,
-            endTime,
             days: isRecurring ? days : [],
             intervalSeconds,
             command: "ON",
             createdBy: user._id,
             status: "ACTIVE",
             isRecurring,
-            isOvernight,
-            startCron,
-            endCron
+            startCron
         });
 
-        // Add jobs to queue
+        // ==================== ADD ONLY START JOB ====================
         const startJobId = `trigger-start-${deviceId}-${schedule._id.toString()}`;
-        const endJobId = `trigger-end-${deviceId}-${schedule._id.toString()}`;
 
-        await addScheduleJob(startJobId, {
-            deviceId,
-            command: "ON",
-            type: "start",
-            eventId: schedule._id.toString(),
-            isRecurring
-        }, startCron);
+        if (isRecurring) {
+            // Recurring → Use Cron
+            await addScheduleJob(startJobId, {
+                deviceId,
+                command: "ON",
+                type: "start",
+                eventId: schedule._id.toString(),
+                isRecurring: true
+            }, startCron);
+        } else {
+            // One-time → Use Delay
+            const now = new Date();
+            const [hour, minute] = startTime.split(":").map(Number);
 
-        await addScheduleJob(endJobId, {
-            deviceId,
-            command: "OFF",
-            type: "end",
-            eventId: schedule._id.toString(),
-            isRecurring
-        }, endCron);
+            const startDate = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
+                hour,
+                minute
+            ));
+
+            const delayMs = Math.max(0, startDate.getTime() - now.getTime());
+
+            await addScheduleJob(startJobId, {
+                deviceId,
+                command: "ON",
+                type: "start",
+                eventId: schedule._id.toString(),
+                isRecurring: false
+            }, null, delayMs);   // delayMs = null cron
+        }
 
         res.status(201).json({
             success: true,
-            message: `${isRecurring ? "Recurring" : "One-time"} trigger event created successfully`,
-            schedule,
-            isOvernight,
-            isRecurring
+            message: `${isRecurring ? "Recurring" : "One-time"} trigger schedule created successfully`,
+            schedule
         });
 
     } catch (error) {
-        console.error("Create Trigger event Error:", error);
+        console.error("Create Trigger Schedule Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -191,12 +283,108 @@ const getTriggerEventsByDeviceID = async (req, res) => {
 };
 
 // ====================== TRIGGER DEVICE - CURRENT/NEXT EVENT ======================
+// const getCurrentOrNextTriggerEventData = async (deviceId) => {
+//     try {
+//         const now = new Date();
+//         const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+
+//         // Get all ACTIVE events for this trigger device
+//         const events = await TriggerSchedule.find({
+//             deviceId: deviceId,
+//             status: "ACTIVE"
+//         }).sort({ startTime: 1 });
+
+//         let currentEvent = null;
+//         let nextEvent = null;
+
+//         for (const ev of events) {
+//             const { startTime, endTime, isOvernight } = ev;
+
+//             let isActiveNow = false;
+
+//             if (!isOvernight) {
+//                 if (currentTime >= startTime && currentTime < endTime) {
+//                     isActiveNow = true;
+//                 }
+//             } else {
+//                 if (currentTime >= startTime || currentTime < endTime) {
+//                     isActiveNow = true;
+//                 }
+//             }
+
+//             if (isActiveNow) {
+//                 currentEvent = ev;
+//                 break;
+//             } else if (!currentEvent && currentTime < startTime) {
+//                 if (!nextEvent || startTime < nextEvent.startTime) {
+//                     nextEvent = ev;
+//                 }
+//             }
+//         }
+
+//         if (currentEvent) {
+//             // Calculate remaining time
+//             const [endH, endM] = currentEvent.endTime.split(':').map(Number);
+//             let endDate = new Date(Date.UTC(
+//                 now.getUTCFullYear(),
+//                 now.getUTCMonth(),
+//                 now.getUTCDate(),
+//                 endH,
+//                 endM,
+//                 0
+//             ));
+
+//             if (endDate <= now) endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+//             const remainingMs = endDate - now;
+//             const remainingMinutes = Math.floor(remainingMs / (1000 * 60));
+
+//             return {
+//                 type: "CURRENT",
+//                 event: currentEvent,
+//                 remainingMinutes: remainingMinutes > 0 ? remainingMinutes : 0,
+//                 remainingText: remainingMinutes > 0 ? `${remainingMinutes} min remaining` : "Ending soon",
+//                 isTrigger: true
+//             };
+//         }
+//         else if (nextEvent) {
+//             return {
+//                 type: "NEXT",
+//                 event: nextEvent,
+//                 isTrigger: true
+//             };
+//         }
+//         else {
+//             return {
+//                 type: "NO_EVENT",
+//                 event: null,
+//                 message: "No active or upcoming trigger event",
+//                 isTrigger: true
+//             };
+//         }
+
+//     } catch (err) {
+//         console.error("Get Current/Next Trigger Event Error:", err);
+//         return {
+//             type: "NO_EVENT",
+//             event: null,
+//             message: "Error fetching trigger event",
+//             isTrigger: true
+//         };
+//     }
+// };
+
 const getCurrentOrNextTriggerEventData = async (deviceId) => {
     try {
         const now = new Date();
-        const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
 
-        // Get all ACTIVE events for this trigger device
+        const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+        const currentDay = now.toLocaleString('en-US', {
+            weekday: 'long',
+            timeZone: 'UTC'
+        }).toLowerCase();
+
+        // Get all ACTIVE trigger events
         const events = await TriggerSchedule.find({
             deviceId: deviceId,
             status: "ACTIVE"
@@ -206,7 +394,14 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
         let nextEvent = null;
 
         for (const ev of events) {
-            const { startTime, endTime, isOvernight } = ev;
+            const { startTime, endTime, days, isOvernight, isRecurring } = ev;
+
+            // Recurring event hai to current day check karo
+            if (isRecurring && days && days.length > 0) {
+                if (!days.map(d => d.toLowerCase()).includes(currentDay)) {
+                    continue;
+                }
+            }
 
             let isActiveNow = false;
 
@@ -215,6 +410,7 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
                     isActiveNow = true;
                 }
             } else {
+                // Overnight case
                 if (currentTime >= startTime || currentTime < endTime) {
                     isActiveNow = true;
                 }
@@ -222,8 +418,10 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
 
             if (isActiveNow) {
                 currentEvent = ev;
-                break;
-            } else if (!currentEvent && currentTime < startTime) {
+                break;                    // Pehla active event
+            }
+            else if (!currentEvent && currentTime < startTime) {
+                // Sabse jaldi aane wala next event
                 if (!nextEvent || startTime < nextEvent.startTime) {
                     nextEvent = ev;
                 }
@@ -242,7 +440,9 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
                 0
             ));
 
-            if (endDate <= now) endDate.setUTCDate(endDate.getUTCDate() + 1);
+            if (endDate <= now) {
+                endDate.setUTCDate(endDate.getUTCDate() + 1);
+            }
 
             const remainingMs = endDate - now;
             const remainingMinutes = Math.floor(remainingMs / (1000 * 60));
@@ -266,7 +466,7 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
             return {
                 type: "NO_EVENT",
                 event: null,
-                message: "No active or upcoming trigger event",
+                message: "No active or upcoming trigger event found",
                 isTrigger: true
             };
         }
