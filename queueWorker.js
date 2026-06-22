@@ -6,6 +6,7 @@ const { connectMQTT } = require("./src/mqtt/mqttClient");
 const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
+const TriggerSchedule = require("./src/models/triggerEventModel");
 const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
@@ -45,6 +46,21 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     if (device.category === "trigger" && device.manualButton === true) {
         console.log(`🔧 Manual Button is ENABLED for Trigger Device ${deviceId} → Skipping command`);
         return { skipped: true, reason: "manual_button_enabled" };
+    }
+
+    // ==================== TRIGGER SCHEDULE CHECK ====================
+    if (device.category === "trigger") {
+        const triggerEvent = await TriggerSchedule.findOne({
+            _id: eventId,
+            deviceId: deviceId
+        });
+
+        if (triggerEvent && triggerEvent.status === "INACTIVE") {
+            console.log(`⛔ Skipping command ${command} for Trigger Device ${deviceId} - Event is INACTIVE`);
+            return { skipped: true, reason: "inactive_trigger_event" };
+        }
+
+        console.log(`✅ Trigger Event is ACTIVE → Proceeding with command`);
     }
 
 

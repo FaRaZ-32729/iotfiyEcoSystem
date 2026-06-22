@@ -4,6 +4,7 @@ const Device = require("../models/deviceModel");
 const { generateCron } = require("../queues/cronHelper");
 const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
 
+// ==================== CREATE TRIGGER EVENT ====================
 const createTriggerSchedule = async (req, res) => {
     try {
         const { deviceId, startTime, days = [] } = req.body;
@@ -129,13 +130,14 @@ const createTriggerSchedule = async (req, res) => {
     }
 };
 
-// Helper Functions
+// Helper Function
 const getNextDayName = (day) => {
     const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     const index = days.indexOf(day);
     return days[(index + 1) % 7];
 };
 
+// Helper Function
 const shiftDays = (days) => {
     const dayOrder = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     return days.map(d => {
@@ -164,6 +166,98 @@ const getTriggerEventsByDeviceID = async (req, res) => {
     } catch (error) {
         console.error("Get Trigger Events Error:", error);
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ====================== TRIGGER DEVICE - CURRENT/NEXT EVENT ======================
+const getCurrentOrNextTriggerEventData = async (deviceId) => {
+    try {
+        const now = new Date();
+        const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+
+        // Get all ACTIVE events for this trigger device
+        const events = await TriggerSchedule.find({
+            deviceId: deviceId,
+            status: "ACTIVE"
+        }).sort({ startTime: 1 });
+
+        let currentEvent = null;
+        let nextEvent = null;
+
+        for (const ev of events) {
+            const { startTime, endTime, isOvernight } = ev;
+
+            let isActiveNow = false;
+
+            if (!isOvernight) {
+                if (currentTime >= startTime && currentTime < endTime) {
+                    isActiveNow = true;
+                }
+            } else {
+                if (currentTime >= startTime || currentTime < endTime) {
+                    isActiveNow = true;
+                }
+            }
+
+            if (isActiveNow) {
+                currentEvent = ev;
+                break;
+            } else if (!currentEvent && currentTime < startTime) {
+                if (!nextEvent || startTime < nextEvent.startTime) {
+                    nextEvent = ev;
+                }
+            }
+        }
+
+        if (currentEvent) {
+            // Calculate remaining time
+            const [endH, endM] = currentEvent.endTime.split(':').map(Number);
+            let endDate = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
+                endH,
+                endM,
+                0
+            ));
+
+            if (endDate <= now) endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+            const remainingMs = endDate - now;
+            const remainingMinutes = Math.floor(remainingMs / (1000 * 60));
+
+            return {
+                type: "CURRENT",
+                event: currentEvent,
+                remainingMinutes: remainingMinutes > 0 ? remainingMinutes : 0,
+                remainingText: remainingMinutes > 0 ? `${remainingMinutes} min remaining` : "Ending soon",
+                isTrigger: true
+            };
+        }
+        else if (nextEvent) {
+            return {
+                type: "NEXT",
+                event: nextEvent,
+                isTrigger: true
+            };
+        }
+        else {
+            return {
+                type: "NO_EVENT",
+                event: null,
+                message: "No active or upcoming trigger event",
+                isTrigger: true
+            };
+        }
+
+    } catch (err) {
+        console.error("Get Current/Next Trigger Event Error:", err);
+        return {
+            type: "NO_EVENT",
+            event: null,
+            message: "Error fetching trigger event",
+            isTrigger: true
+        };
     }
 };
 
@@ -228,4 +322,4 @@ const deleteTriggerEvent = async (req, res) => {
     }
 };
 
-module.exports = { createTriggerSchedule, getTriggerEventsByDeviceID, toggleTriggerEventStatus, deleteTriggerEvent };
+module.exports = { createTriggerSchedule, getTriggerEventsByDeviceID, toggleTriggerEventStatus, deleteTriggerEvent, getCurrentOrNextTriggerEventData };
