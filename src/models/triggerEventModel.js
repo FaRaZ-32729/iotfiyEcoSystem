@@ -61,6 +61,6 @@ const triggerScheduleSchema = new mongoose.Schema({
 // Compound Index
 triggerScheduleSchema.index({ deviceId: 1, status: 1 });
 
-const TriggerSchedule = mongoose.model("triggerschedules", triggerScheduleSchema);
+const TriggerSchedule = mongoose.model("triggerEvents", triggerScheduleSchema);
 
 module.exports = TriggerSchedule;

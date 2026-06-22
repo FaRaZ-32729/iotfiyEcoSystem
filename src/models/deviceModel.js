@@ -349,6 +349,13 @@ deviceSchema.set('toJSON', {
         if (category === "trigger") {
             keepFields.push("manualButton");
             keepFields.push("interval");
+            keepFields.push("tempAlertAccess");
+            keepFields.push("humiAlertAccess");
+            keepFields.push("odourAlertAccess");
+            keepFields.push("aqiAlertAccess");
+            keepFields.push("glAlertAccess");
+            keepFields.push("voltageAlertAccess");
+            keepFields.push("currentAlertAccess");
         }
 
         Object.keys(ret).forEach(key => {

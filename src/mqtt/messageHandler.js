@@ -1,5 +1,6 @@
 const { getCurrentOrNextScheduleData } = require("../controllers/eventController");
 const { activeOTASessions } = require("../controllers/otaController");
+const { getCurrentOrNextTriggerEventData } = require("../controllers/triggerEventController");
 const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
 const { broadcastOTAProgress } = require("../services/otaProgressService");

@@ -28,25 +28,46 @@ const createTriggerSchedule = async (req, res) => {
 
         const intervalSeconds = device.interval || 5;
 
-        // Calculate endTime = startTime + interval
-        const [hours, minutes] = startTime.split(":").map(Number);
-        let endHours = hours;
-        let endMinutes = minutes + intervalSeconds;
+        // // Calculate endTime = startTime + interval
+        // const [hours, minutes] = startTime.split(":").map(Number);
+        // let endHours = hours;
+        // let endMinutes = minutes + intervalSeconds;
+        // let isOvernight = false;
+
+        // // Proper overnight calculation
+        // if (endMinutes >= 60) {
+        //     endHours += Math.floor(endMinutes / 60);
+        //     endMinutes = endMinutes % 60;
+
+        //     // Agar endHours 24 ya usse zyada ho gaya to overnight hai
+        //     if (endHours >= 24) {
+        //         isOvernight = true;
+        //         endHours = endHours % 24;
+        //     }
+        // }
+
+        // const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+
+        // ==================== CALCULATE endTime (in SECONDS) ====================
+        const [startHours, startMinutes] = startTime.split(":").map(Number);
+        
+        let totalMinutes = startHours * 60 + startMinutes;
+        totalMinutes += Math.floor(intervalSeconds / 60);   // Convert seconds to minutes
+        let extraSeconds = intervalSeconds % 60;           // Remaining seconds (for logging)
+
+        let endHours = Math.floor(totalMinutes / 60);
+        let endMinutes = totalMinutes % 60;
+
         let isOvernight = false;
 
-        // Proper overnight calculation
-        if (endMinutes >= 60) {
-            endHours += Math.floor(endMinutes / 60);
-            endMinutes = endMinutes % 60;
-
-            // Agar endHours 24 ya usse zyada ho gaya to overnight hai
-            if (endHours >= 24) {
-                isOvernight = true;
-                endHours = endHours % 24;
-            }
+        if (endHours >= 24) {
+            isOvernight = true;
+            endHours = endHours % 24;
         }
 
         const endTime = `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+
+        console.log(`⏱️ Trigger Event Created: ${startTime} + ${intervalSeconds} seconds → ${endTime} (Overnight: ${isOvernight})`);
 
         const isRecurring = days.length > 0;
 
