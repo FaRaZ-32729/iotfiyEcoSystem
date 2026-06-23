@@ -5,6 +5,7 @@ const Venue = require("../models/venueModel");
 const Device = require("../models/deviceModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
 const Subscription = require("../models/subscriptionModel");
+const mongoose = require("mongoose")
 
 // src/validations/user.validation.js
 const { z } = require("zod");
@@ -575,7 +576,4 @@ const verifyEmailChange = async (req, res) => {
     }
 };
 
-
-
-
-module.exports = { getSingleUser, suspendManager, getAllUsers, getAllManagers, getUsersByManager, deleteUser, deleteManager, updateManagerCreatedUser, requestEmailChange, verifyEmailChange, };
+module.exports = { getSingleUser, suspendManager, getAllUsers, getAllManagers, getUsersByManager, deleteUser, deleteManager, updateManagerCreatedUser, requestEmailChange, verifyEmailChange,};

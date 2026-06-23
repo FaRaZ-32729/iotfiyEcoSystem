@@ -29,4 +29,5 @@ router.get("/manager/:managerId", authenticate, getUsersByManager);
 router.delete("/delete-user/:id", authenticate, deleteUser);
 router.delete("/delete-manager/:id", authenticate, roleGuard(["admin"]), deleteManager);
 
+
 module.exports = router;

@@ -13,6 +13,8 @@ const eventRoutes = require("./eventRoutes")
 const alertRoutes = require("./alertRoutes")
 const otaRoutes = require("./otaRoutes")
 const triggerEventRoutes = require("./triggerEventRoutes")
+const adminDashboardRoutes = require("./adminDashboardRoutes");
+const authenticate = require("../middlewares/auth");
 
 // Mount all routes with proper prefixes
 router.use("/auth", authRoutes);
@@ -25,6 +27,7 @@ router.use("/event", eventRoutes);
 router.use("/alerts", alertRoutes);
 router.use("/ota", otaRoutes);
 router.use("/trigger", triggerEventRoutes);
+router.use("/dashboard", authenticate, adminDashboardRoutes);
 
 // Health check route
 router.get("/health", (req, res) => {
