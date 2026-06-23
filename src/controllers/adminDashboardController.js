@@ -418,6 +418,48 @@ const getAllVenues = async (req, res) => {
     }
 };
 
+// src/controllers/deviceController.js
+const getAllDevices = async (req, res) => {
+    try {
+        const devices = await Device.find()
+            .select("deviceId deviceName deviceType category status state venue")
+            .populate("venue", "name")           // Get venue name
+            .lean();
+
+        if (devices.length === 0) {
+            return res.status(200).json({
+                success: true,
+                total: 0,
+                devices: []
+            });
+        }
+
+        const formattedDevices = devices.map(device => ({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            deviceType: device.deviceType,
+            category: device.category,
+            status: device.status,
+            state: device.state,
+            venueName: device.venue?.name || "N/A"
+        }));
+
+        res.status(200).json({
+            success: true,
+            total: formattedDevices.length,
+            devices: formattedDevices
+        });
+
+    } catch (error) {
+        console.error("Get All Devices Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while fetching devices"
+        });
+    }
+};
 
 
-module.exports = { getManagersStats, getManagerFullDetails, getSubUserDetails, getAllOrganizations, getAllVenues };
+
+
+module.exports = { getManagersStats, getManagerFullDetails, getSubUserDetails, getAllOrganizations, getAllVenues, getAllDevices };
