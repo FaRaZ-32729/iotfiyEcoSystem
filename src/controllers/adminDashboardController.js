@@ -310,6 +310,114 @@ const getSubUserDetails = async (req, res) => {
     }
 };
 
+// src/controllers/organizationController.js
+const getAllOrganizations = async (req, res) => {
+    try {
+        const organizations = await Organization.find()
+            .populate("owner", "name email")   // Get owner details
+            .lean();
+
+        if (organizations.length === 0) {
+            return res.status(200).json({
+                success: true,
+                total: 0,
+                organizations: []
+            });
+        }
+
+        // Enrich each organization with venue & device counts
+        const enrichedOrgs = await Promise.all(organizations.map(async (org) => {
+            // Get all venues in this organization
+            const venues = await Venue.find({ organization: org._id })
+                .select("_id name")
+                .lean();
+
+            const venueIds = venues.map(v => v._id);
+
+            // Get total devices in all these venues
+            const totalDevices = venueIds.length > 0
+                ? await Device.countDocuments({ venue: { $in: venueIds } })
+                : 0;
+
+            return {
+                id: org._id,
+                name: org.name,
+                owner: {
+                    id: org.owner?._id,
+                    name: org.owner?.name || "N/A",
+                    email: org.owner?.email || "N/A"
+                },
+                totalVenues: venues.length,
+                totalDevices: totalDevices,
+                // venues: venues.map(v => ({
+                //     id: v._id,
+                //     name: v.name
+                // }))
+            };
+        }));
+
+        res.status(200).json({
+            success: true,
+            total: enrichedOrgs.length,
+            organizations: enrichedOrgs
+        });
+
+    } catch (error) {
+        console.error("Get All Organizations Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while fetching organizations"
+        });
+    }
+};
+
+// src/controllers/venueController.js
+const getAllVenues = async (req, res) => {
+    try {
+        const venues = await Venue.find()
+            .populate("organization", "name")   // Get organization name
+            .lean();
+
+        if (venues.length === 0) {
+            return res.status(200).json({
+                success: true,
+                total: 0,
+                venues: []
+            });
+        }
+
+        // Add device count for each venue
+        const enrichedVenues = await Promise.all(venues.map(async (venue) => {
+            const totalDevices = await Device.countDocuments({
+                venue: venue._id
+            });
+
+            return {
+                id: venue._id,
+                name: venue.name,
+                organization: {
+                    id: venue.organization?._id,
+                    name: venue.organization?.name || "N/A"
+                },
+                totalDevices: totalDevices
+            };
+        }));
+
+        res.status(200).json({
+            success: true,
+            total: enrichedVenues.length,
+            venues: enrichedVenues
+        });
+
+    } catch (error) {
+        console.error("Get All Venues Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error while fetching venues"
+        });
+    }
+};
 
 
-module.exports = { getManagersStats, getManagerFullDetails, getSubUserDetails };
+
+module.exports = { getManagersStats, getManagerFullDetails, getSubUserDetails, getAllOrganizations, getAllVenues };
