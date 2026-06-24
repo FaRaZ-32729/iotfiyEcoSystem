@@ -764,19 +764,6 @@ const resetPassword = async (req, res) => {
 };
 
 // verified user after login
-// const verifyMe = async (req, res) => {
-//     try {
-//         return res.status(200).json({
-//             success: true,
-//             user: req.user,
-//         });
-//     } catch (error) {
-//         console.error("Error While Verifing User", error);
-//         res.status(500).json({ success: false, message: "Server error" });
-//     }
-// };
-// src/modules/auth/auth.controller.js
-
 const me = async (req, res) => {
     try {
         const user = req.user;
@@ -834,42 +821,6 @@ const me = async (req, res) => {
     }
 };
 
-// const me = async (req, res) => {
-//     try {
-//         const user = req.user;
-
-//         // Return only safe, necessary fields
-//         const safeUser = {
-//             id: user._id,
-//             name: user.name,
-//             email: user.email,
-//             role: user.role,
-//             permission: user.permission,
-//             isActive: user.isActive,
-//             isVerified: user.isVerified,
-//             timer: user.timer,
-//             createdBy: user.createdBy,
-//             lastLogin: user.lastLogin,
-//             // Organizations & Venues (if needed)
-//             organizations: user.organizations,
-//             venues: user.venues,
-//             // Subscription info
-//             currentSubscription: user.currentSubscription
-//         };
-
-//         return res.status(200).json({
-//             success: true,
-//             user: safeUser
-//         });
-
-//     } catch (error) {
-//         console.error("Error While Verifying User:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Server error"
-//         });
-//     }
-// };
 
 module.exports = {
     registerUser,

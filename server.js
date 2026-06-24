@@ -66,8 +66,8 @@ app.get("/", (req, res) => {
 global.io = io;
 initializeMQTT();
 
-// console.log(new Date().toUTCString());
-console.log("backend is running on port")
+// console.log(new Date().toUTCString());\
+
 // Start server
 server.listen(port, () => {
     console.log(`Express & WebSocket is running on port : ${port}`);
