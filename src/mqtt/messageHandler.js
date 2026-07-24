@@ -112,7 +112,26 @@ const setupMessageHandler = (client) => {
 
                 console.log(`📡 Status update from device ${deviceId}: ${payloadStr}`);
 
-                const newStatus = payloadStr === "online" ? "online" : "offline";
+                let newStatus = null;
+                if (payloadStr === "online" || payloadStr === "offline") {
+                    newStatus = payloadStr;
+                } else {
+                    try {
+                        const parsed = JSON.parse(payloadStr);
+                        const s = String(parsed?.status || parsed?.state || "")
+                            .toLowerCase()
+                            .trim();
+                        if (s === "online" || s === "connected") newStatus = "online";
+                        else if (s === "offline" || s === "disconnected") newStatus = "offline";
+                    } catch {
+                        // ignore non-JSON
+                    }
+                }
+
+                if (!newStatus) {
+                    console.warn(`⚠️ Unrecognized status payload from ${deviceId}: ${payloadStr}`);
+                    return;
+                }
 
                 const updatedDevice = await Device.findOneAndUpdate(
                     { deviceId: deviceId },

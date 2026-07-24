@@ -1,6 +1,9 @@
 // src/services/scheduler/scheduleService.js
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("./scheduleQueue");
+const Device = require("../models/deviceModel");
+// const { runAcScheduledCommand } = require("../acScheduleHelper");
+const { runAcScheduledCommand } = require("../services/acScheduleHelper");
 
 const addScheduleJob = async (jobId, data, cronExpression) => {
     try {
@@ -31,10 +34,11 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
 
         // ==================== IMMEDIATE TRIGGER LOGIC (Only for TODAY) ====================
         if (data.type === "start") {
-            const { startTime, endTime, } = data;
+            const { startTime, endTime, command = "ON" } = data;
 
-            // Check if this schedule is for TODAY
-            const isForToday = data.days ? data.days.some(day => day.toLowerCase() === utcDayName) : true;
+            const isForToday = data.days?.length
+                ? data.days.some(day => day.toLowerCase() === utcDayName)
+                : true;
 
             if (!isForToday) {
                 console.log(`⏭️ Schedule is for future day(s). No immediate trigger.`);
@@ -46,19 +50,37 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
             const isCurrentlyActive = currentTime >= startTime && currentTime < endTime;
 
             if (isCurrentlyActive) {
-                console.log(`⚡ Current time is INSIDE active window → Sending immediate ON command...`);
+                console.log(`⚡ Current time is INSIDE active window → Sending immediate ${command} command...`);
 
-                const success = publishCommand(data.deviceId, {
-                    type: "COMMAND",
-                    command: "ON",
-                    scheduleId: jobId,
-                    isImmediate: true
-                });
+                const device = await Device.findOne({ deviceId: data.deviceId });
 
-                if (success) {
-                    console.log(`✅ Immediate ON command successfully sent to ${data.deviceId}`);
+                if (device?.deviceType === "AC") {
+                    const fakeSchedule = {
+                        setTemperature: data.setTemperature,
+                        command,
+                    };
+                    const success = await runAcScheduledCommand(device, fakeSchedule, command, {
+                        scheduleId: jobId,
+                        isImmediate: true,
+                    });
+                    if (success) {
+                        console.log(`✅ Immediate AC ${command} sent to ${data.deviceId}`);
+                    } else {
+                        console.warn(`⚠️ Failed immediate AC command for ${data.deviceId}`);
+                    }
                 } else {
-                    console.warn(`⚠️ Failed to send immediate command`);
+                    const success = publishCommand(data.deviceId, {
+                        type: "COMMAND",
+                        command: "ON",
+                        scheduleId: jobId,
+                        isImmediate: true
+                    });
+
+                    if (success) {
+                        console.log(`✅ Immediate ON command successfully sent to ${data.deviceId}`);
+                    } else {
+                        console.warn(`⚠️ Failed to send immediate command`);
+                    }
                 }
             } else {
                 console.log(`⏭️ Current time is OUTSIDE the event window.`);

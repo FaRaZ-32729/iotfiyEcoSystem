@@ -29,6 +29,12 @@ const eventSchema = new mongoose.Schema({
         default: "ON"
     },
 
+    /** AC only: target setpoint when command is ON */
+    setTemperature: {
+        type: Number,
+        default: null
+    },
+
     status: {
         type: String,
         enum: ["ACTIVE", "INACTIVE"],

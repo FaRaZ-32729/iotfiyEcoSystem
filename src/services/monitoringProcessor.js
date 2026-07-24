@@ -24,6 +24,16 @@ const processMonitoringDeviceData = async (device, payload) => {
         device.espAQI = payload.AQI;
         updatedFields.push(`AQI: ${payload.AQI}`);
     }
+    if (payload.smoke !== undefined) {
+        const smokeDetected =
+            payload.smoke === true ||
+            String(payload.smoke).toLowerCase() === "detected" ||
+            String(payload.smoke).toLowerCase() === "true" ||
+            Number(payload.smoke) >= 1;
+        device.espSmoke = smokeDetected;
+        payload.smoke = smokeDetected;
+        updatedFields.push(`smoke: ${smokeDetected}`);
+    }
     if (payload.gass !== undefined) {
         device.espGL = payload.gass;
         updatedFields.push(`gass: ${payload.gass}`);
@@ -43,6 +53,19 @@ const processMonitoringDeviceData = async (device, payload) => {
 
     // Check conditions and update alert flags
     const alerts = checkConditions(device, payload);
+
+    // Smoke is ESP boolean (not a threshold condition)
+    if (payload.smoke !== undefined || device.deviceType === "SMD") {
+        const smokeDetected = device.espSmoke === true;
+        device.smokeAlert = smokeDetected;
+        if (smokeDetected && !alerts.some((a) => a.type === "smoke")) {
+            alerts.push({
+                type: "smoke",
+                value: "Detected",
+                message: "Smoke Detected",
+            });
+        }
+    }
 
     if (alerts.length > 0) {
         console.log(`🚨 Alerts Triggered: ${alerts.length} alert(s)`);
@@ -81,6 +104,10 @@ const processMonitoringDeviceData = async (device, payload) => {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;
                 sensorData.AQI = payload.AQI;
+            }
+            else if (device.deviceType === "SMD") {
+                sensorData.AQI = payload.AQI;
+                sensorData.smoke = payload.smoke;
             }
             else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;

@@ -15,6 +15,15 @@ const processDeviceData = async (deviceId, payload) => {
         device.espHumidity = payload.humidity !== undefined ? payload.humidity : device.espHumidity;
         device.espOdour = payload.odour !== undefined ? payload.odour : device.espOdour;
         device.espAQI = payload.AQI !== undefined ? payload.AQI : device.espAQI;
+        if (payload.smoke !== undefined) {
+            const smokeDetected =
+                payload.smoke === true ||
+                String(payload.smoke).toLowerCase() === "detected" ||
+                String(payload.smoke).toLowerCase() === "true" ||
+                Number(payload.smoke) >= 1;
+            device.espSmoke = smokeDetected;
+            device.smokeAlert = smokeDetected;
+        }
         device.espGL = payload.gass !== undefined ? payload.gass : device.espGL;
         device.espVoltage = payload.voltage !== undefined ? payload.voltage : device.espVoltage;
         device.espCurrent = payload.current !== undefined ? payload.current : device.espCurrent;

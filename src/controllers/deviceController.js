@@ -80,6 +80,7 @@ const createDevice = async (req, res) => {
                 humiAlertAccess: false,
                 odourAlertAccess: false,
                 aqiAlertAccess: false,
+                smokeAlertAccess: false,
                 glAlertAccess: false,
                 voltageAlertAccess: false,
                 currentAlertAccess: false,
@@ -98,6 +99,9 @@ const createDevice = async (req, res) => {
             if (typeof validatedData.aqiAlertAccess === "boolean") {
                 alertAccessConfig.aqiAlertAccess = validatedData.aqiAlertAccess;
             }
+            if (typeof validatedData.smokeAlertAccess === "boolean") {
+                alertAccessConfig.smokeAlertAccess = validatedData.smokeAlertAccess;
+            }
             if (typeof validatedData.glAlertAccess === "boolean") {
                 alertAccessConfig.glAlertAccess = validatedData.glAlertAccess;
             }
@@ -112,16 +116,26 @@ const createDevice = async (req, res) => {
             const dt = validatedData.deviceType;
             if (dt === "OD") {
                 alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
                 alertAccessConfig.glAlertAccess = false;
                 alertAccessConfig.voltageAlertAccess = false;
                 alertAccessConfig.currentAlertAccess = false;
             } else if (dt === "THD") {
                 alertAccessConfig.odourAlertAccess = false;
                 alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
                 alertAccessConfig.glAlertAccess = false;
                 alertAccessConfig.voltageAlertAccess = false;
                 alertAccessConfig.currentAlertAccess = false;
             } else if (dt === "AQID") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "SMD") {
+                alertAccessConfig.tempAlertAccess = false;
+                alertAccessConfig.humiAlertAccess = false;
                 alertAccessConfig.odourAlertAccess = false;
                 alertAccessConfig.glAlertAccess = false;
                 alertAccessConfig.voltageAlertAccess = false;
@@ -129,14 +143,51 @@ const createDevice = async (req, res) => {
             } else if (dt === "GLD") {
                 alertAccessConfig.odourAlertAccess = false;
                 alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
                 alertAccessConfig.voltageAlertAccess = false;
                 alertAccessConfig.currentAlertAccess = false;
             } else if (dt === "ED") {
                 alertAccessConfig.odourAlertAccess = false;
                 alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
                 alertAccessConfig.glAlertAccess = false;
+            } else if (dt === "AC") {
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
             }
         }
+
+        // AC-only defaults (no conditions)
+        const isAc = validatedData.deviceType === "AC";
+
+        let acBrand = null;
+        if (isAc) {
+            const { getBrandByName } = require("../services/ackitBrandService");
+            acBrand = await getBrandByName(validatedData.brandName);
+            if (!acBrand) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Selected AC brand not found on Ackit",
+                });
+            }
+        }
+
+        const acDefaults = isAc
+            ? {
+                conditions: [],
+                brandName: String(acBrand.brandName).toLowerCase(),
+                setTemperature: 26,
+                acMode: "Cool",
+                fanSpeed: "Low",
+                acLocked: false,
+                acHealthAlert: false,
+                energyMonitoringIncluded: validatedData.energyMonitoringIncluded === true,
+            }
+            : {};
 
         // Create Device
         const device = await Device.create({
@@ -145,9 +196,10 @@ const createDevice = async (req, res) => {
             deviceType: validatedData.deviceType,
             category: validatedData.category,
             venue: validatedData.venueId,
-            conditions: validatedData.conditions,
+            conditions: isAc ? [] : validatedData.conditions,
             apiKey,
-            ...alertAccessConfig
+            ...alertAccessConfig,
+            ...acDefaults
         });
 
         res.status(201).json({
@@ -164,9 +216,19 @@ const createDevice = async (req, res) => {
                 humiAlertAccess: device.humiAlertAccess,
                 odourAlertAccess: device.odourAlertAccess,
                 aqiAlertAccess: device.aqiAlertAccess,
+                smokeAlertAccess: device.smokeAlertAccess,
                 glAlertAccess: device.glAlertAccess,
                 voltageAlertAccess: device.voltageAlertAccess,
                 currentAlertAccess: device.currentAlertAccess,
+                ...(isAc && {
+                    brandName: device.brandName,
+                    setTemperature: device.setTemperature,
+                    acMode: device.acMode,
+                    fanSpeed: device.fanSpeed,
+                    acLocked: device.acLocked,
+                    acHealthAlert: device.acHealthAlert,
+                    energyMonitoringIncluded: device.energyMonitoringIncluded,
+                }),
             }
         });
 
@@ -517,6 +579,9 @@ const updateDevice = async (req, res) => {
             if (typeof validatedData.aqiAlertAccess === "boolean") {
                 device.aqiAlertAccess = validatedData.aqiAlertAccess;
             }
+            if (typeof validatedData.smokeAlertAccess === "boolean") {
+                device.smokeAlertAccess = validatedData.smokeAlertAccess;
+            }
             if (typeof validatedData.glAlertAccess === "boolean") {
                 device.glAlertAccess = validatedData.glAlertAccess;
             }
@@ -535,6 +600,34 @@ const updateDevice = async (req, res) => {
         if (validatedData.venueId) device.venue = validatedData.venueId;
         if (validatedData.conditions) device.conditions = validatedData.conditions;
         if (validatedData.interval !== undefined) device.interval = validatedData.interval;
+        if (typeof validatedData.energyMonitoringIncluded === "boolean") {
+            device.energyMonitoringIncluded = validatedData.energyMonitoringIncluded;
+        }
+
+        const nextType = validatedData.deviceType || device.deviceType;
+
+        // AC brand (Ackit name only)
+        if (nextType === "AC") {
+            if (validatedData.brandName) {
+                const { getBrandByName } = require("../services/ackitBrandService");
+                const acBrand = await getBrandByName(validatedData.brandName);
+                if (!acBrand) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Selected AC brand not found on Ackit",
+                    });
+                }
+                device.brandName = String(acBrand.brandName).toLowerCase();
+            } else if (!device.brandName) {
+                return res.status(400).json({
+                    success: false,
+                    message: "brandName is required for AC devices",
+                });
+            }
+            device.conditions = [];
+        } else if (validatedData.deviceType && validatedData.deviceType !== "AC") {
+            device.brandName = null;
+        }
 
         await device.save();
 
@@ -738,4 +831,172 @@ const manualButtonForTriggerDevice = async (req, res) => {
     }
 };
 
-module.exports = { createDevice, getAllDevices, getDevicesByVenue, getSingleDevice, updateDevice, deleteDevice, manualButtonForTriggerDevice, getDevicesByVersion, getMyDevices };
+const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
+const VALID_FAN_SPEEDS = ["Low", "Medium", "Ultra", "Turbo"];
+
+/**
+ * PUT /device/ac-settings/:deviceId
+ * Partial update: setTemperature, acMode, fanSpeed, acLocked
+ * Always: DB save → MQTT command → socket emit
+ */
+const updateAcSettings = async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const { setTemperature, acMode, fanSpeed, acLocked } = req.body;
+
+        const device = await Device.findOne({ deviceId });
+        if (!device) {
+            return res.status(404).json({ success: false, message: "Device not found" });
+        }
+
+        if (device.deviceType !== "AC") {
+            return res.status(403).json({
+                success: false,
+                message: "This API is only for AC devices",
+            });
+        }
+
+        if (device.status !== "online") {
+            return res.status(400).json({
+                success: false,
+                message: "Device is offline. Cannot update AC settings.",
+            });
+        }
+
+        const { emitAcDeviceLive } = require("../services/acScheduleHelper");
+        const { publishAcSettingsChanges } = require("../mqtt/acKitCommandPublisher");
+
+        const changes = {};
+        let changed = false;
+
+        if (setTemperature !== undefined) {
+            const temp = Number(setTemperature);
+            if (!Number.isFinite(temp) || temp < 16 || temp > 30) {
+                return res.status(400).json({
+                    success: false,
+                    message: "setTemperature must be a number between 16 and 30",
+                });
+            }
+            device.setTemperature = temp;
+            changes.setTemperature = temp;
+            changed = true;
+        }
+
+        if (acMode !== undefined) {
+            const mode = String(acMode).trim();
+            if (!VALID_AC_MODES.includes(mode)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `acMode must be one of: ${VALID_AC_MODES.join(", ")}`,
+                });
+            }
+            device.acMode = mode;
+            changes.acMode = mode;
+            changed = true;
+        }
+
+        if (fanSpeed !== undefined) {
+            const speed = String(fanSpeed).trim();
+            if (!VALID_FAN_SPEEDS.includes(speed)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `fanSpeed must be one of: ${VALID_FAN_SPEEDS.join(", ")}`,
+                });
+            }
+            device.fanSpeed = speed;
+            changes.fanSpeed = speed;
+            changed = true;
+        }
+
+        if (typeof acLocked === "boolean") {
+            device.acLocked = acLocked;
+            changes.acLocked = acLocked;
+            changed = true;
+        }
+
+        if (!changed) {
+            return res.status(400).json({
+                success: false,
+                message: "Provide at least one of: setTemperature, acMode, fanSpeed, acLocked",
+            });
+        }
+
+        device.lastUpdateTime = new Date();
+        await device.save();
+
+        // Ackit brand API → IR pulse → MQTT (no ESP flash pack required)
+        const mqttResult = await publishAcSettingsChanges(deviceId, changes, device);
+        if (!mqttResult.ok) {
+            return res.status(mqttResult.status || 500).json({
+                success: false,
+                message: mqttResult.message || "Settings saved but failed to publish MQTT command",
+                device: {
+                    deviceId: device.deviceId,
+                    setTemperature: device.setTemperature,
+                    acMode: device.acMode,
+                    fanSpeed: device.fanSpeed,
+                    acLocked: device.acLocked,
+                    state: device.state,
+                },
+            });
+        }
+
+        emitAcDeviceLive(device);
+
+        return res.status(200).json({
+            success: true,
+            message: "AC settings updated",
+            device: {
+                deviceId: device.deviceId,
+                deviceName: device.deviceName,
+                state: device.state,
+                brandName: device.brandName,
+                setTemperature: device.setTemperature,
+                acMode: device.acMode,
+                fanSpeed: device.fanSpeed,
+                acLocked: device.acLocked,
+                acHealthAlert: device.acHealthAlert,
+                energyMonitoringIncluded: device.energyMonitoringIncluded,
+            },
+        });
+    } catch (error) {
+        console.error("Update AC Settings Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while updating AC settings",
+        });
+    }
+};
+
+/** GET /device/ac-brands — names from Ackit DB only */
+const getAcBrandOptions = async (_req, res) => {
+    try {
+        const { listBrandOptions } = require("../services/ackitBrandService");
+        const brands = await listBrandOptions();
+        return res.status(200).json({
+            success: true,
+            count: brands.length,
+            brands,
+        });
+    } catch (error) {
+        console.error("Get AC Brand Options Error:", error);
+        return res.status(503).json({
+            success: false,
+            message: error.message || "Failed to load AC brands from Ackit",
+        });
+    }
+};
+
+module.exports = {
+    createDevice,
+    getAllDevices,
+    getDevicesByVenue,
+    getSingleDevice,
+    updateDevice,
+    deleteDevice,
+    manualButtonForTriggerDevice,
+    getDevicesByVersion,
+    getMyDevices,
+    updateAcSettings,
+    getAcBrandOptions,
+};

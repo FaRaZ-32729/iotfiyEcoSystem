@@ -11,7 +11,7 @@ const deviceSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true, trim: true },
     deviceName: { type: String, required: true, trim: true },
 
-    deviceType: { type: String, required: true, enum: ["OD", "THD", "AQID", "GLD", "ED"] },
+    deviceType: { type: String, required: true, enum: ["OD", "THD", "AQID", "GLD", "ED", "AC", "SMD"] },
     category: { type: String, required: true, enum: ["monitoring", "scheduling", "trigger"] },
 
     status: { type: String, enum: ["online", "offline"], default: "offline" },
@@ -39,6 +39,9 @@ const deviceSchema = new mongoose.Schema({
     aqiAlert: { type: Boolean, default: false },
     espAQI: { type: Number, default: null },
 
+    smokeAlert: { type: Boolean, default: false },
+    espSmoke: { type: Boolean, default: false },
+
     glAlert: { type: Boolean, default: false },
     espGL: { type: Number, default: null },
 
@@ -48,11 +51,32 @@ const deviceSchema = new mongoose.Schema({
     currentAlert: { type: Boolean, default: false },
     espCurrent: { type: Number, default: null },
 
+    // === AC Device fields ===
+    /** Ackit brand name only (unique on Ackit) — IR codes stay on Ackit */
+    brandName: { type: String, default: null, trim: true, lowercase: true },
+    setTemperature: { type: Number, default: 26 },
+    acMode: {
+        type: String,
+        enum: ["Cool", "Heat", "Dry", "FanOnly", "Auto"],
+        default: "Cool"
+    },
+    fanSpeed: {
+        type: String,
+        enum: ["Low", "Medium", "Ultra", "Turbo"],
+        default: "Low"
+    },
+    acLocked: { type: Boolean, default: false },
+    acHealthAlert: { type: Boolean, default: false },
+    energyMonitoringIncluded: { type: Boolean, default: false },
+    espPower: { type: Number, default: null },
+    espEnergy: { type: Number, default: null },
+
     // === ALERT ACCESS FIELDS (Only for Trigger Category) ===
     tempAlertAccess: { type: Boolean, default: false },
     humiAlertAccess: { type: Boolean, default: false },
     odourAlertAccess: { type: Boolean, default: false },
     aqiAlertAccess: { type: Boolean, default: false },
+    smokeAlertAccess: { type: Boolean, default: false },
     glAlertAccess: { type: Boolean, default: false },
     voltageAlertAccess: { type: Boolean, default: false },
     currentAlertAccess: { type: Boolean, default: false },
@@ -71,6 +95,7 @@ deviceSchema.pre('save', async function () {
         this.humiAlertAccess = undefined;
         this.odourAlertAccess = undefined;
         this.aqiAlertAccess = undefined;
+        this.smokeAlertAccess = undefined;
         this.glAlertAccess = undefined;
         this.voltageAlertAccess = undefined;
         this.currentAlertAccess = undefined;
@@ -82,16 +107,24 @@ deviceSchema.pre('save', async function () {
         "OD": ["odourAlert", "espOdour", "odourAlertAccess"],
         "THD": [],
         "AQID": ["aqiAlert", "espAQI", "aqiAlertAccess"],
+        "SMD": ["aqiAlert", "espAQI", "aqiAlertAccess", "smokeAlert", "espSmoke", "smokeAlertAccess"],
         "GLD": ["glAlert", "espGL", "glAlertAccess"],
         "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent",
-            "voltageAlertAccess", "currentAlertAccess"]
+            "voltageAlertAccess", "currentAlertAccess"],
+        "AC": [
+            "brandName",
+            "setTemperature", "acMode", "fanSpeed", "acLocked",
+            "acHealthAlert", "energyMonitoringIncluded",
+            "espCurrent", "espVoltage", "espPower", "espEnergy"
+        ]
     };
 
+    // SMD: AQI + smoke only (no temperature / humidity)
     const keepFields = [
         "deviceId", "deviceName", "deviceType", "category", "venue",
         "conditions", "apiKey",
-        "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
         "lastUpdateTime", "status", "lastSeen", "version",
+        ...(type === "SMD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
         ...(allowedFields[type] || [])
     ];
 
@@ -126,6 +159,7 @@ deviceSchema.set('toJSON', {
             delete ret.humiAlertAccess;
             delete ret.odourAlertAccess;
             delete ret.aqiAlertAccess;
+            delete ret.smokeAlertAccess;
             delete ret.glAlertAccess;
             delete ret.voltageAlertAccess;
             delete ret.currentAlertAccess;
@@ -135,16 +169,23 @@ deviceSchema.set('toJSON', {
             "OD": ["odourAlert", "espOdour", "odourAlertAccess"],
             "THD": [],
             "AQID": ["aqiAlert", "espAQI", "aqiAlertAccess"],
+            "SMD": ["aqiAlert", "espAQI", "aqiAlertAccess", "smokeAlert", "espSmoke", "smokeAlertAccess"],
             "GLD": ["glAlert", "espGL", "glAlertAccess"],
             "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent",
-                "voltageAlertAccess", "currentAlertAccess"]
+                "voltageAlertAccess", "currentAlertAccess"],
+            "AC": [
+                "brandName",
+                "setTemperature", "acMode", "fanSpeed", "acLocked",
+                "acHealthAlert", "energyMonitoringIncluded",
+                "espCurrent", "espVoltage", "espPower", "espEnergy"
+            ]
         };
 
         const keepFields = [
             "deviceId", "deviceName", "deviceType", "category", "venue",
             "conditions", "apiKey",
-            "temperatureAlert", "humidityAlert", "espTemperature", "espHumidity",
             "lastUpdateTime", "status", "interval", "version",
+            ...(type === "SMD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
             ...(allowedFields[type] || [])
         ];
 
@@ -158,6 +199,7 @@ deviceSchema.set('toJSON', {
             keepFields.push("humiAlertAccess");
             keepFields.push("odourAlertAccess");
             keepFields.push("aqiAlertAccess");
+            keepFields.push("smokeAlertAccess");
             keepFields.push("glAlertAccess");
             keepFields.push("voltageAlertAccess");
             keepFields.push("currentAlertAccess");

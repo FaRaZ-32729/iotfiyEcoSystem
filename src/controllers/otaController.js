@@ -108,11 +108,11 @@ const getOTAVersionsByDeviceType = async (req, res) => {
         }
 
         // Validate deviceType
-        const validTypes = ["OD", "THD", "AQID", "GLD", "ED"];
+        const validTypes = ["OD", "THD", "AQID", "SMD", "GLD", "ED"];
         if (!validTypes.includes(deviceType)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid deviceType. Allowed: OD, THD, AQID, GLD, ED"
+                message: "Invalid deviceType. Allowed: OD, THD, AQID, SMD, GLD, ED"
             });
         }
 

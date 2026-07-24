@@ -11,7 +11,7 @@ const { reconcileMissedCommands } = require("../services/reconciliationService")
 
 const createSchedule = async (req, res) => {
     try {
-        const { deviceId, startTime, endTime, days = [], command = "ON" } = req.body;
+        const { deviceId, startTime, endTime, days = [], command = "ON", setTemperature } = req.body;
         const user = req.user;
 
         if (!deviceId || !startTime || !endTime) {
@@ -23,8 +23,54 @@ const createSchedule = async (req, res) => {
             return res.status(403).json({ success: false, message: "Invalid or non-scheduling device" });
         }
 
+        const isAc = device.deviceType === "AC";
+        let eventCommand = String(command || "ON").toUpperCase().trim();
+
+        if (isAc) {
+            if (!["ON", "OFF"].includes(eventCommand)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "AC event command must be ON or OFF"
+                });
+            }
+            if (eventCommand === "ON") {
+                const temp = Number(setTemperature);
+                if (!Number.isFinite(temp)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "setTemperature is required when AC event command is ON"
+                    });
+                }
+            }
+        } else {
+            eventCommand = "ON";
+        }
+
         const overnight = isOvernight(startTime, endTime);
         const isRecurring = days.length > 0;
+
+        // Per-device: block overlapping ACTIVE schedules (same days + overlapping time)
+        const existing = await Event.find({ deviceId, status: "ACTIVE" }).lean();
+        const conflict = findScheduleConflict(existing, {
+            startTime,
+            endTime,
+            days,
+            isOvernight: overnight,
+            isRecurring,
+        });
+        if (conflict) {
+            return res.status(409).json({
+                success: false,
+                message:
+                    "An event already exists for this device on overlapping day(s) and time. Choose a different time or days.",
+                conflict: {
+                    _id: conflict._id,
+                    startTime: conflict.startTime,
+                    endTime: conflict.endTime,
+                    days: conflict.days,
+                },
+            });
+        }
 
         let startCron, endCron, scheduleType;
 
@@ -69,7 +115,8 @@ const createSchedule = async (req, res) => {
             startTime,
             endTime,
             days: isRecurring ? days : [],
-            command,
+            command: eventCommand,
+            setTemperature: isAc && eventCommand === "ON" ? Number(setTemperature) : null,
             isOvernight: overnight,
             isRecurring,
             startCron,
@@ -81,9 +128,28 @@ const createSchedule = async (req, res) => {
         const startJobId = `schedule-start-${deviceId}-${schedule._id.toString()}`;
         const endJobId = `schedule-end-${deviceId}-${schedule._id.toString()}`;
 
-        // Add jobs
-        await addScheduleJob(startJobId, { deviceId, command: "ON", type: "start", startTime, endTime, days, eventId: schedule._id.toString(), isRecurring }, startCron);
-        await addScheduleJob(endJobId, { deviceId, command: "OFF", type: "end", startTime, endTime, days, eventId: schedule._id.toString(), isRecurring }, endCron);
+        const jobMeta = {
+            deviceId,
+            startTime,
+            endTime,
+            days: isRecurring ? days : [],
+            eventId: schedule._id.toString(),
+            isRecurring,
+            setTemperature: schedule.setTemperature,
+        };
+
+        // Start: AC uses event command (ON/OFF); THD/others always ON at window start
+        await addScheduleJob(
+            startJobId,
+            { ...jobMeta, command: isAc ? eventCommand : "ON", type: "start" },
+            startCron
+        );
+        // End: always OFF at window end (worker skips end for AC OFF-only events)
+        await addScheduleJob(
+            endJobId,
+            { ...jobMeta, command: "OFF", type: "end" },
+            endCron
+        );
 
 
         res.status(201).json({
@@ -112,6 +178,59 @@ const shiftDays = (days) => {
         const idx = dayOrder.indexOf(d.toLowerCase().trim());
         return dayOrder[(idx + 1) % 7];
     });
+};
+
+const toMinutes = (hhmm = "") => {
+    const [h, m] = String(hhmm).split(":").map(Number);
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+};
+
+/**
+ * Expand a schedule into same-day minute segments (handles overnight → next day).
+ * One-time (no days) uses today's UTC weekday.
+ */
+const buildTimeSegments = ({ startTime, endTime, days = [], isOvernight: overnight, isRecurring }) => {
+    const start = toMinutes(startTime);
+    const end = toMinutes(endTime);
+    let dayList = (days || []).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+
+    if (!isRecurring || dayList.length === 0) {
+        const todayUtc = new Date()
+            .toLocaleString("en-US", { weekday: "long", timeZone: "UTC" })
+            .toLowerCase();
+        dayList = [todayUtc];
+    }
+
+    const segments = [];
+    for (const day of dayList) {
+        if (overnight) {
+            segments.push({ day, start, end: 24 * 60 });
+            segments.push({ day: getNextDayName(day), start: 0, end });
+        } else {
+            segments.push({ day, start, end });
+        }
+    }
+    return segments;
+};
+
+const segmentsOverlap = (a, b) =>
+    a.day === b.day && a.start < b.end && b.start < a.end;
+
+/** Returns the conflicting existing event, or null */
+const findScheduleConflict = (existingEvents, candidate) => {
+    const candSegs = buildTimeSegments(candidate);
+    for (const ev of existingEvents) {
+        const evSegs = buildTimeSegments({
+            startTime: ev.startTime,
+            endTime: ev.endTime,
+            days: ev.days || [],
+            isOvernight: !!ev.isOvernight,
+            isRecurring: !!ev.isRecurring && (ev.days || []).length > 0,
+        });
+        const hits = candSegs.some((c) => evSegs.some((e) => segmentsOverlap(c, e)));
+        if (hits) return ev;
+    }
+    return null;
 };
 
 // Get Current/Next Schedule
@@ -241,27 +360,71 @@ const manualToggle = async (req, res) => {
             });
         }
 
+        // AC: hard-block On/Off while a CURRENT ACTIVE schedule window is running
+        if (device.deviceType === "AC") {
+            const scheduleInfo = await getCurrentOrNextScheduleData(deviceId);
+            if (scheduleInfo?.type === "CURRENT" && scheduleInfo?.event) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Disable active schedule first before manually toggling AC",
+                    currentEvent: scheduleInfo.event,
+                });
+            }
+        }
+
         const newCommand = device.state === "ON" ? "OFF" : "ON";
 
         console.log(`🔧 Manual Toggle: ${device.state} → ${newCommand} for ${deviceId}`);
 
-        // Send command to device
-        const success = publishCommand(deviceId, {
-            type: "COMMAND",
-            command: newCommand,
-            isManual: true,
-            timestamp: new Date().toISOString()
-        });
+        // AC: Ackit apply keys (power.on / power.off + optional temp)
+        let success;
+        if (device.deviceType === "AC") {
+            const { publishAcMqttCommand, emitAcDeviceLive } = require("../services/acScheduleHelper");
 
-        if (!success) {
-            return res.status(500).json({ success: false, message: "Failed to send command" });
+            const mqttResult = await publishAcMqttCommand(
+                device,
+                newCommand,
+                newCommand === "ON" ? device.setTemperature : null
+            );
+            if (!mqttResult?.ok) {
+                return res.status(mqttResult?.status || 500).json({
+                    success: false,
+                    message: mqttResult?.message || "Failed to send command",
+                });
+            }
+            device.state = newCommand;
+            device.lastUpdateTime = new Date();
+            await device.save();
+            emitAcDeviceLive(device);
+        } else {
+            success = publishCommand(deviceId, {
+                type: "COMMAND",
+                command: newCommand,
+                isManual: true,
+                timestamp: new Date().toISOString()
+            });
+
+            if (!success) {
+                return res.status(500).json({ success: false, message: "Failed to send command" });
+            }
+
+            device.state = newCommand;
+            await device.save();
+
+            if (global.io) {
+                global.io.emit(`device/${deviceId}`, {
+                    deviceId: device.deviceId,
+                    deviceName: device.deviceName,
+                    deviceType: device.deviceType,
+                    category: device.category,
+                    state: device.state,
+                    timestamp: new Date(),
+                });
+            }
         }
 
-        // Update device state immediately
-        device.state = newCommand;
-        await device.save();
-
         // ==================== MANUAL OVERRIDE LOGIC (Only if eventId is provided) ====================
+        // Note: AC hard-block above means this override path is for non-AC / no CURRENT window
         if (eventId) {
             const activeSchedule = await Event.findOne({
                 _id: eventId,
@@ -306,13 +469,7 @@ const getEventsByDevice = async (req, res) => {
             .sort({ createdAt: -1 })
             .select("-__v");
 
-        if (events.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "No events found"
-            });
-        }
-
+        // Always 200 with array — empty list is valid (e.g. after deleting last event)
         return res.json({
             success: true,
             count: events.length,

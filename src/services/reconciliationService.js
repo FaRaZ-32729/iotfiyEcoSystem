@@ -1,17 +1,17 @@
-// src/services/scheduler/reconciliationService.js
+// src/services/reconciliationService.js
 const Schedule = require("../models/eventModel");
+const Device = require("../models/deviceModel");
 const { publishCommand } = require("../mqtt/commandPublisher");
+const { runAcScheduledCommand } = require("./acScheduleHelper");
 
 const reconcileMissedCommands = async (deviceId) => {
     try {
         const now = new Date();
 
-        // Get current UTC time in HH:mm format
         const currentHour = String(now.getUTCHours()).padStart(2, '0');
         const currentMinute = String(now.getUTCMinutes()).padStart(2, '0');
         const currentTime = `${currentHour}:${currentMinute}`;
 
-        // Get UTC day name correctly
         const utcDay = now.toLocaleString('en-US', {
             weekday: 'long',
             timeZone: 'UTC'
@@ -20,6 +20,9 @@ const reconcileMissedCommands = async (deviceId) => {
         const today = now.toISOString().split('T')[0];
 
         console.log(`🔍 Reconciling at UTC ${currentTime} | Day: ${utcDay} | Device: ${deviceId}`);
+
+        const device = await Device.findOne({ deviceId });
+        const isAc = device?.deviceType === "AC";
 
         const schedules = await Schedule.find({
             deviceId,
@@ -45,9 +48,9 @@ const reconcileMissedCommands = async (deviceId) => {
                 continue;
             }
 
-            const { startTime, endTime, days, isOvernight } = schedule;
+            const { startTime, endTime, days, isOvernight, isRecurring } = schedule;
 
-            if (!days.includes(utcDay)) continue;
+            if (isRecurring && days.length && !days.includes(utcDay)) continue;
 
             let isActiveNow = false;
 
@@ -56,7 +59,6 @@ const reconcileMissedCommands = async (deviceId) => {
                     isActiveNow = true;
                 }
             } else {
-
                 if (currentTime >= startTime || currentTime < endTime) {
                     isActiveNow = true;
                 }
@@ -68,10 +70,13 @@ const reconcileMissedCommands = async (deviceId) => {
             }
         }
 
-        if (activeSchedule) {
-            let durationSeconds = null;
+        if (!activeSchedule) {
+            console.log(`⏭️  No active schedule window currently for ${deviceId}`);
+            return;
+        }
 
-            const [endHour, endMinute] = activeSchedule.endTime.split(':').map(Number);
+        let durationSeconds = null;
+        const [endHour, endMinute] = activeSchedule.endTime.split(':').map(Number);
 
             let endDate = new Date(Date.UTC(
                 now.getUTCFullYear(),
@@ -82,15 +87,25 @@ const reconcileMissedCommands = async (deviceId) => {
                 0
             ));
 
-            // Handle overnight case
-            if (endDate <= now) {
-                endDate.setUTCDate(endDate.getUTCDate() + 1);
-            }
+        if (endDate <= now) {
+            endDate.setUTCDate(endDate.getUTCDate() + 1);
+        }
 
-            durationSeconds = Math.floor((endDate - now) / 1000);
+        durationSeconds = Math.floor((endDate - now) / 1000);
 
+        const eventCommand = activeSchedule.command || "ON";
+
+        if (isAc && device) {
+            console.log(`✅ Found active AC schedule → Sending ${eventCommand} to ${deviceId}`);
+            await runAcScheduledCommand(device, activeSchedule, eventCommand, {
+                scheduleId: activeSchedule._id,
+                durationSeconds: eventCommand === "ON" ? durationSeconds : null,
+            });
+            return;
+        }
+
+        if (eventCommand === "ON") {
             console.log(`✅ Found active schedule → Sending ON command to ${deviceId}`);
-
             publishCommand(deviceId, {
                 type: "COMMAND",
                 command: "ON",
@@ -98,7 +113,7 @@ const reconcileMissedCommands = async (deviceId) => {
                 durationSeconds: durationSeconds
             });
         } else {
-            console.log(`⏭️  No active schedule window currently for ${deviceId}`);
+            console.log(`⏭️ Active schedule command is OFF for non-AC device ${deviceId} — skip reconcile`);
         }
 
     } catch (error) {

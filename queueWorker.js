@@ -7,6 +7,7 @@ const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
 const TriggerSchedule = require("./src/models/triggerEventModel");
+const { runAcScheduledCommand } = require("./src/services/acScheduleHelper");
 const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
@@ -87,14 +88,26 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         return { skipped: true, reason: "manual_override" };
     }
 
+    const isAc = device.deviceType === "AC";
+    const jobType = job.data.type;
+
+    // AC OFF event: end job is no-op (window ends, nothing to restore)
+    if (isAc && jobType === "end" && schedule?.command === "OFF") {
+        console.log(`⏭️ AC OFF event ended for ${deviceId} — no end command`);
+        return { skipped: true, reason: "ac_off_event_end" };
+    }
+
+    // AC start uses event command (ON or OFF); end uses OFF when event was ON
+    const effectiveCommand = isAc && jobType === "start"
+        ? (schedule?.command || command)
+        : command;
 
     console.log(`⚡ [SCHEDULE EXECUTING] ${new Date().toUTCString()}`);
-    console.log(`   Device: ${deviceId} | Command: ${command}`);
+    console.log(`   Device: ${deviceId} | Command: ${effectiveCommand}`);
 
     // ==================== CALCULATE REMAINING SECONDS ====================
 
-
-    if (command === "ON" && schedule && schedule.endTime) {
+    if (effectiveCommand === "ON" && schedule && schedule.endTime) {
         const now = new Date();
         const currentHour = now.getUTCHours();
         const currentMinute = now.getUTCMinutes();
@@ -125,15 +138,29 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         await initializeMQTTForWorker();
     }
 
+    if (isAc) {
+        const success = await runAcScheduledCommand(device, schedule, effectiveCommand, {
+            durationSeconds,
+            scheduleId: schedule?._id,
+        });
+
+        if (success) {
+            console.log(`✅ AC command "${effectiveCommand}" sent to ${deviceId}`);
+            return { success: true };
+        }
+        console.error(`❌ Failed to publish AC command to ${deviceId}`);
+        throw new Error(`Device ${deviceId} unreachable`);
+    }
+
     const success = publishCommand(deviceId, {
         type: "COMMAND",
-        command: command,
+        command: effectiveCommand,
         durationSeconds: durationSeconds,
         timestamp: new Date().toISOString()
     });
 
     if (success) {
-        console.log(`✅ Command "${command}" sent to ${deviceId}`);
+        console.log(`✅ Command "${effectiveCommand}" sent to ${deviceId}`);
         return { success: true };
     } else {
         console.error(`❌ Failed to publish command to ${deviceId}`);

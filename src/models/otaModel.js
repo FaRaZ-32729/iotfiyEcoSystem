@@ -21,7 +21,7 @@ const otaSchema = new mongoose.Schema({
     },
     deviceType: {
         type: String,
-        enum: ["OD", "THD", "AQID", "GLD", "ED"],
+        enum: ["OD", "THD", "AQID", "SMD", "GLD", "ED"],
         required: true
     },
     uploadedBy: {
