@@ -11,7 +11,7 @@ const deviceSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true, trim: true },
     deviceName: { type: String, required: true, trim: true },
 
-    deviceType: { type: String, required: true, enum: ["OD", "THD", "AQID", "GLD", "ED", "AC", "SMD"] },
+    deviceType: { type: String, required: true, enum: ["OD", "THD", "AQID", "GLD", "ED", "AC", "SMD", "WLD"] },
     category: { type: String, required: true, enum: ["monitoring", "scheduling", "trigger"] },
 
     status: { type: String, enum: ["online", "offline"], default: "offline" },
@@ -40,7 +40,13 @@ const deviceSchema = new mongoose.Schema({
     espAQI: { type: Number, default: null },
 
     smokeAlert: { type: Boolean, default: false },
+    /** Smoke level 0–100% from ESP (SMD). Separate from boolean espSmoke. */
+    espSmokePct: { type: Number, default: null },
     espSmoke: { type: Boolean, default: false },
+
+    /** Water leakage (WLD) — ESP waterLeak true/false */
+    waterLeakAlert: { type: Boolean, default: false },
+    espWaterLeak: { type: Boolean, default: false },
 
     glAlert: { type: Boolean, default: false },
     espGL: { type: Number, default: null },
@@ -77,6 +83,7 @@ const deviceSchema = new mongoose.Schema({
     odourAlertAccess: { type: Boolean, default: false },
     aqiAlertAccess: { type: Boolean, default: false },
     smokeAlertAccess: { type: Boolean, default: false },
+    waterLeakAlertAccess: { type: Boolean, default: false },
     glAlertAccess: { type: Boolean, default: false },
     voltageAlertAccess: { type: Boolean, default: false },
     currentAlertAccess: { type: Boolean, default: false },
@@ -96,6 +103,7 @@ deviceSchema.pre('save', async function () {
         this.odourAlertAccess = undefined;
         this.aqiAlertAccess = undefined;
         this.smokeAlertAccess = undefined;
+        this.waterLeakAlertAccess = undefined;
         this.glAlertAccess = undefined;
         this.voltageAlertAccess = undefined;
         this.currentAlertAccess = undefined;
@@ -107,7 +115,8 @@ deviceSchema.pre('save', async function () {
         "OD": ["odourAlert", "espOdour", "odourAlertAccess"],
         "THD": [],
         "AQID": ["aqiAlert", "espAQI", "aqiAlertAccess"],
-        "SMD": ["aqiAlert", "espAQI", "aqiAlertAccess", "smokeAlert", "espSmoke", "smokeAlertAccess"],
+        "SMD": ["smokeAlert", "espSmoke", "espSmokePct", "smokeAlertAccess"],
+        "WLD": ["waterLeakAlert", "espWaterLeak", "waterLeakAlertAccess"],
         "GLD": ["glAlert", "espGL", "glAlertAccess"],
         "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent",
             "voltageAlertAccess", "currentAlertAccess"],
@@ -119,12 +128,12 @@ deviceSchema.pre('save', async function () {
         ]
     };
 
-    // SMD: AQI + smoke only (no temperature / humidity)
+    // SMD / WLD: no temperature / humidity fields
     const keepFields = [
         "deviceId", "deviceName", "deviceType", "category", "venue",
         "conditions", "apiKey",
         "lastUpdateTime", "status", "lastSeen", "version",
-        ...(type === "SMD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
+        ...(type === "SMD" || type === "WLD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
         ...(allowedFields[type] || [])
     ];
 
@@ -160,6 +169,7 @@ deviceSchema.set('toJSON', {
             delete ret.odourAlertAccess;
             delete ret.aqiAlertAccess;
             delete ret.smokeAlertAccess;
+            delete ret.waterLeakAlertAccess;
             delete ret.glAlertAccess;
             delete ret.voltageAlertAccess;
             delete ret.currentAlertAccess;
@@ -169,7 +179,8 @@ deviceSchema.set('toJSON', {
             "OD": ["odourAlert", "espOdour", "odourAlertAccess"],
             "THD": [],
             "AQID": ["aqiAlert", "espAQI", "aqiAlertAccess"],
-            "SMD": ["aqiAlert", "espAQI", "aqiAlertAccess", "smokeAlert", "espSmoke", "smokeAlertAccess"],
+            "SMD": ["smokeAlert", "espSmoke", "espSmokePct", "smokeAlertAccess"],
+            "WLD": ["waterLeakAlert", "espWaterLeak", "waterLeakAlertAccess"],
             "GLD": ["glAlert", "espGL", "glAlertAccess"],
             "ED": ["voltageAlert", "espVoltage", "currentAlert", "espCurrent",
                 "voltageAlertAccess", "currentAlertAccess"],
@@ -185,7 +196,7 @@ deviceSchema.set('toJSON', {
             "deviceId", "deviceName", "deviceType", "category", "venue",
             "conditions", "apiKey",
             "lastUpdateTime", "status", "interval", "version",
-            ...(type === "SMD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
+            ...(type === "SMD" || type === "WLD" ? [] : ["temperatureAlert", "humidityAlert", "espTemperature", "espHumidity"]),
             ...(allowedFields[type] || [])
         ];
 
@@ -200,6 +211,7 @@ deviceSchema.set('toJSON', {
             keepFields.push("odourAlertAccess");
             keepFields.push("aqiAlertAccess");
             keepFields.push("smokeAlertAccess");
+            keepFields.push("waterLeakAlertAccess");
             keepFields.push("glAlertAccess");
             keepFields.push("voltageAlertAccess");
             keepFields.push("currentAlertAccess");

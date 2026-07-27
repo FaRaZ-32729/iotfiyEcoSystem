@@ -23,6 +23,8 @@ const sensorSchema = new mongoose.Schema({
     humidity: Number,
     odour: Number,
     AQI: Number,
+    smoke: Number,
+    waterLeak: Boolean,
     gass: Number,
     voltage: Number,
     current: Number,

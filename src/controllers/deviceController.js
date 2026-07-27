@@ -137,6 +137,16 @@ const createDevice = async (req, res) => {
                 alertAccessConfig.tempAlertAccess = false;
                 alertAccessConfig.humiAlertAccess = false;
                 alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.glAlertAccess = false;
+                alertAccessConfig.voltageAlertAccess = false;
+                alertAccessConfig.currentAlertAccess = false;
+            } else if (dt === "WLD") {
+                alertAccessConfig.tempAlertAccess = false;
+                alertAccessConfig.humiAlertAccess = false;
+                alertAccessConfig.odourAlertAccess = false;
+                alertAccessConfig.aqiAlertAccess = false;
+                alertAccessConfig.smokeAlertAccess = false;
                 alertAccessConfig.glAlertAccess = false;
                 alertAccessConfig.voltageAlertAccess = false;
                 alertAccessConfig.currentAlertAccess = false;
@@ -161,8 +171,9 @@ const createDevice = async (req, res) => {
             }
         }
 
-        // AC-only defaults (no conditions)
+        // AC / WLD — no threshold conditions
         const isAc = validatedData.deviceType === "AC";
+        const isWld = validatedData.deviceType === "WLD";
 
         let acBrand = null;
         if (isAc) {
@@ -196,7 +207,7 @@ const createDevice = async (req, res) => {
             deviceType: validatedData.deviceType,
             category: validatedData.category,
             venue: validatedData.venueId,
-            conditions: isAc ? [] : validatedData.conditions,
+            conditions: isAc || isWld ? [] : validatedData.conditions,
             apiKey,
             ...alertAccessConfig,
             ...acDefaults
@@ -625,6 +636,15 @@ const updateDevice = async (req, res) => {
                 });
             }
             device.conditions = [];
+        } else if (nextType === "WLD") {
+            device.conditions = [];
+            if (validatedData.category && validatedData.category !== "monitoring") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Water Leakage Device (WLD) supports monitoring category only",
+                });
+            }
+            device.category = "monitoring";
         } else if (validatedData.deviceType && validatedData.deviceType !== "AC") {
             device.brandName = null;
         }

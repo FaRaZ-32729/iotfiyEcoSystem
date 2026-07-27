@@ -47,13 +47,14 @@ const getAlertsByOrganization = async (req, res) => {
                 { odourAlert: true },
                 { aqiAlert: true },
                 { smokeAlert: true },
+                { waterLeakAlert: true },
                 { glAlert: true },
                 { voltageAlert: true },
                 { currentAlert: true }
             ]
         })
             .populate('venue', 'name')
-            .select('deviceId deviceName deviceType category venue temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert glAlert voltageAlert currentAlert espTemperature espHumidity espOdour espAQI espSmoke espGL espVoltage espCurrent lastUpdateTime');
+            .select('deviceId deviceName deviceType category venue temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert espTemperature espHumidity espOdour espAQI espSmoke espSmokePct espWaterLeak espGL espVoltage espCurrent lastUpdateTime');
 
         const alerts = devicesWithAlerts.map(device => {
             const activeAlerts = [];
@@ -64,7 +65,11 @@ const getAlertsByOrganization = async (req, res) => {
             if (device.aqiAlert) activeAlerts.push({ type: "AQI", value: device.espAQI });
             if (device.smokeAlert) activeAlerts.push({
                 type: "smoke",
-                value: "Detected"
+                value: device.espSmokePct != null ? device.espSmokePct : "Detected"
+            });
+            if (device.waterLeakAlert) activeAlerts.push({
+                type: "waterLeak",
+                value: device.espWaterLeak === true ? "Detected" : "Detected"
             });
             if (device.glAlert) activeAlerts.push({ type: "gass", value: device.espGL });
             if (device.voltageAlert) activeAlerts.push({ type: "voltage", value: device.espVoltage });
@@ -142,12 +147,13 @@ const getAlertsByVenue = async (req, res) => {
                 { odourAlert: true },
                 { aqiAlert: true },
                 { smokeAlert: true },
+                { waterLeakAlert: true },
                 { glAlert: true },
                 { voltageAlert: true },
                 { currentAlert: true }
             ]
         })
-            .select('deviceId deviceName deviceType category temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert glAlert voltageAlert currentAlert espTemperature espHumidity espOdour espAQI espSmoke espGL espVoltage espCurrent lastUpdateTime')
+            .select('deviceId deviceName deviceType category temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert espTemperature espHumidity espOdour espAQI espSmoke espSmokePct espWaterLeak espGL espVoltage espCurrent lastUpdateTime')
             .sort({ lastUpdateTime: -1 });
 
         const alerts = devicesWithAlerts.map(device => {
@@ -159,7 +165,11 @@ const getAlertsByVenue = async (req, res) => {
             if (device.aqiAlert) activeAlerts.push({ type: "AQI", value: device.espAQI });
             if (device.smokeAlert) activeAlerts.push({
                 type: "smoke",
-                value: "Detected"
+                value: device.espSmokePct != null ? device.espSmokePct : "Detected"
+            });
+            if (device.waterLeakAlert) activeAlerts.push({
+                type: "waterLeak",
+                value: device.espWaterLeak === true ? "Detected" : "Detected"
             });
             if (device.glAlert) activeAlerts.push({ type: "gass", value: device.espGL });
             if (device.voltageAlert) activeAlerts.push({ type: "voltage", value: device.espVoltage });

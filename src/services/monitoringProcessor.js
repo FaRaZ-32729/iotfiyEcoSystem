@@ -1,18 +1,30 @@
-// src/services/processors/monitoringProcessor.js
+// src/services/monitoringProcessor.js
 const sensorModel = require("../models/sensorModel");
 const checkConditions = require("./conditionChecker");
+const {
+    applySmdSmokeFromPayload,
+    syncSmdSmokeDetectedFromAlert,
+} = require("./smdSmokeHelper");
+const {
+    applyWldWaterLeakFromPayload,
+    syncWldWaterLeakFromAlert,
+} = require("./wldWaterLeakHelper");
 
 const processMonitoringDeviceData = async (device, payload) => {
     console.log(`\n📡 Processing Monitoring Data for Device: ${device.deviceName} (${device.deviceId})`);
 
     // Update sensor values
     const updatedFields = [];
+    const isSmd = device.deviceType === "SMD";
+    const isWld = device.deviceType === "WLD";
+    const smdSmokeApplied = applySmdSmokeFromPayload(device, payload, updatedFields);
+    const wldApplied = applyWldWaterLeakFromPayload(device, payload, updatedFields);
 
-    if (payload.temperature !== undefined) {
+    if (payload.temperature !== undefined && !isSmd && !isWld) {
         device.espTemperature = payload.temperature;
         updatedFields.push(`temperature: ${payload.temperature}`);
     }
-    if (payload.humidity !== undefined) {
+    if (payload.humidity !== undefined && !isSmd && !isWld) {
         device.espHumidity = payload.humidity;
         updatedFields.push(`humidity: ${payload.humidity}`);
     }
@@ -20,11 +32,11 @@ const processMonitoringDeviceData = async (device, payload) => {
         device.espOdour = payload.odour;
         updatedFields.push(`odour: ${payload.odour}`);
     }
-    if (payload.AQI !== undefined) {
+    if (payload.AQI !== undefined && !isSmd && !smdSmokeApplied) {
         device.espAQI = payload.AQI;
         updatedFields.push(`AQI: ${payload.AQI}`);
     }
-    if (payload.smoke !== undefined) {
+    if (payload.smoke !== undefined && !smdSmokeApplied) {
         const smokeDetected =
             payload.smoke === true ||
             String(payload.smoke).toLowerCase() === "detected" ||
@@ -34,7 +46,8 @@ const processMonitoringDeviceData = async (device, payload) => {
         payload.smoke = smokeDetected;
         updatedFields.push(`smoke: ${smokeDetected}`);
     }
-    if (payload.gass !== undefined) {
+    // Gas leakage (GLD) — do not map onto WLD/SMD
+    if (payload.gass !== undefined && !isSmd && !isWld) {
         device.espGL = payload.gass;
         updatedFields.push(`gass: ${payload.gass}`);
     }
@@ -53,18 +66,15 @@ const processMonitoringDeviceData = async (device, payload) => {
 
     // Check conditions and update alert flags
     const alerts = checkConditions(device, payload);
+    syncSmdSmokeDetectedFromAlert(device, alerts);
+    syncWldWaterLeakFromAlert(device, alerts);
 
-    // Smoke is ESP boolean (not a threshold condition)
-    if (payload.smoke !== undefined || device.deviceType === "SMD") {
-        const smokeDetected = device.espSmoke === true;
-        device.smokeAlert = smokeDetected;
-        if (smokeDetected && !alerts.some((a) => a.type === "smoke")) {
-            alerts.push({
-                type: "smoke",
-                value: "Detected",
-                message: "Smoke Detected",
-            });
-        }
+    if (isSmd) {
+        payload.smokePct = device.espSmokePct;
+        payload.smokeDetected = device.espSmoke === true;
+    }
+    if (isWld || wldApplied) {
+        payload.waterLeak = device.espWaterLeak === true;
     }
 
     if (alerts.length > 0) {
@@ -90,7 +100,6 @@ const processMonitoringDeviceData = async (device, payload) => {
                 timestamp: new Date(),
             };
 
-            // save fields a/c deviceType
             if (device.deviceType === "OD") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;
@@ -106,8 +115,10 @@ const processMonitoringDeviceData = async (device, payload) => {
                 sensorData.AQI = payload.AQI;
             }
             else if (device.deviceType === "SMD") {
-                sensorData.AQI = payload.AQI;
-                sensorData.smoke = payload.smoke;
+                sensorData.smoke = device.espSmokePct ?? payload.smokePct ?? payload.smoke;
+            }
+            else if (device.deviceType === "WLD") {
+                sensorData.waterLeak = device.espWaterLeak === true;
             }
             else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;
@@ -123,7 +134,6 @@ const processMonitoringDeviceData = async (device, payload) => {
         console.error(`❌ Failed to save sensor data for ${device.deviceType}:`, err.message);
     }
 
-    // Prepare data to send to frontend
     const liveData = {
         deviceId: device.deviceId,
         deviceName: device.deviceName,
@@ -134,7 +144,6 @@ const processMonitoringDeviceData = async (device, payload) => {
         timestamp: new Date()
     };
 
-    // Send to frontend via Socket.io
     if (global.io) {
         global.io.emit(`device/${device.deviceId}`, liveData);
         console.log(`📤 Live data sent to frontend for device: ${device.deviceId}`);

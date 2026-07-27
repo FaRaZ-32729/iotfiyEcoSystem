@@ -34,11 +34,19 @@ const processTriggerDeviceData = async (device, payload) => {
         device.espOdour = payload.odour;
         updatedFields.push(`odour: ${payload.odour}`);
     }
-    if (payload.AQI !== undefined) {
+
+    const isSmd = device.deviceType === "SMD";
+    const {
+        applySmdSmokeFromPayload,
+        syncSmdSmokeDetectedFromAlert,
+    } = require("./smdSmokeHelper");
+    const smdSmokeApplied = applySmdSmokeFromPayload(device, payload, updatedFields);
+
+    if (payload.AQI !== undefined && !isSmd && !smdSmokeApplied) {
         device.espAQI = payload.AQI;
         updatedFields.push(`AQI: ${payload.AQI}`);
     }
-    if (payload.smoke !== undefined) {
+    if (payload.smoke !== undefined && !smdSmokeApplied) {
         const smokeDetected =
             payload.smoke === true ||
             String(payload.smoke).toLowerCase() === "detected" ||
@@ -48,7 +56,7 @@ const processTriggerDeviceData = async (device, payload) => {
         payload.smoke = smokeDetected;
         updatedFields.push(`smoke: ${smokeDetected}`);
     }
-    if (payload.gass !== undefined) {
+    if (payload.gass !== undefined && !isSmd) {
         device.espGL = payload.gass;
         updatedFields.push(`gass: ${payload.gass}`);
     }
@@ -65,9 +73,15 @@ const processTriggerDeviceData = async (device, payload) => {
 
     // Check conditions and get alerts
     const alerts = checkConditions(device, payload);
+    syncSmdSmokeDetectedFromAlert(device, alerts);
 
-    // Smoke is ESP boolean (not a threshold condition)
-    if (payload.smoke !== undefined || device.deviceType === "SMD") {
+    if (isSmd) {
+        payload.smokePct = device.espSmokePct;
+        payload.smokeDetected = device.espSmoke === true;
+    }
+
+    // Legacy boolean smoke for non-SMD
+    if (!isSmd && payload.smoke !== undefined) {
         const smokeDetected = device.espSmoke === true;
         device.smokeAlert = smokeDetected;
         if (smokeDetected && !alerts.some((a) => a.type === "smoke")) {
@@ -196,8 +210,7 @@ const processTriggerDeviceData = async (device, payload) => {
                 sensorData.humidity = payload.humidity;
                 sensorData.AQI = payload.AQI;
             } else if (device.deviceType === "SMD") {
-                sensorData.AQI = payload.AQI;
-                sensorData.smoke = payload.smoke;
+                sensorData.smoke = device.espSmokePct ?? payload.smokePct ?? payload.smoke;
             } else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;

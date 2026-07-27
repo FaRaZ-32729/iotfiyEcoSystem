@@ -1,6 +1,7 @@
 // src/services/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 const sensorModel = require("../models/sensorModel");
+const { isWithinAcCommandCooldown } = require("../mqtt/acCommandCooldown");
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
 const VALID_FAN_SPEEDS = ["Low", "Medium", "Ultra", "Turbo"];
@@ -30,11 +31,19 @@ const processSchedulingDeviceData = async (device, payload) => {
         device.espOdour = payload.odour;
         updatedFields.push(`odour: ${payload.odour}`);
     }
-    if (payload.AQI !== undefined) {
+
+    const isSmd = device.deviceType === "SMD";
+    const {
+        applySmdSmokeFromPayload,
+        syncSmdSmokeDetectedFromAlert,
+    } = require("./smdSmokeHelper");
+    const smdSmokeApplied = applySmdSmokeFromPayload(device, payload, updatedFields);
+
+    if (payload.AQI !== undefined && !isSmd && !smdSmokeApplied) {
         device.espAQI = payload.AQI;
         updatedFields.push(`AQI: ${payload.AQI}`);
     }
-    if (payload.smoke !== undefined) {
+    if (payload.smoke !== undefined && !smdSmokeApplied) {
         const smokeDetected =
             payload.smoke === true ||
             String(payload.smoke).toLowerCase() === "detected" ||
@@ -44,7 +53,7 @@ const processSchedulingDeviceData = async (device, payload) => {
         payload.smoke = smokeDetected;
         updatedFields.push(`smoke: ${smokeDetected}`);
     }
-    if (payload.gass !== undefined) {
+    if (payload.gass !== undefined && !isSmd) {
         device.espGL = payload.gass;
         updatedFields.push(`gass: ${payload.gass}`);
     }
@@ -136,7 +145,12 @@ const processSchedulingDeviceData = async (device, payload) => {
             }
         }
 
-        // Setpoint only: prefer setTemperature; if ESP sends "temperature", treat as setpoint alias
+        // Setpoint: prefer setTemperature; "temperature" is ESP alias for setpoint.
+        // Only PHYSICAL REMOTE reports may change Mongo setpoint.
+        // apply/sync/heartbeat echoes must NOT overwrite dashboard/schedule setpoint
+        // (fixes 21→24→21 flicker when ESP default/stale gReportedTemp leaks).
+        // Also ignore "remote" during cooldown after we sent apply — IR self-echo
+        // often looks like a remote press with baked-in capture temp (e.g. 24).
         const remoteSetpointRaw =
             payload.setTemperature !== undefined
                 ? payload.setTemperature
@@ -144,9 +158,27 @@ const processSchedulingDeviceData = async (device, payload) => {
         if (remoteSetpointRaw !== undefined) {
             const remoteSetTemp = Number(remoteSetpointRaw);
             if (Number.isFinite(remoteSetTemp)) {
+                const source = String(payload.source || "").toLowerCase().trim();
+                const echoCooldown = isWithinAcCommandCooldown(device.deviceId);
+                let fromPhysicalRemote =
+                    source === "remote" ||
+                    payload.fromRemote === true ||
+                    payload.fromRemote === "true";
+
+                if (fromPhysicalRemote && echoCooldown) {
+                    fromPhysicalRemote = false;
+                    updatedFields.push(
+                        `setTemperature(remote echo ignored during apply cooldown): ${remoteSetTemp}`
+                    );
+                }
+
                 if (device.acLocked) {
                     const appSetTemp = Number(device.setTemperature);
-                    if (Number.isFinite(appSetTemp) && remoteSetTemp !== appSetTemp) {
+                    if (
+                        fromPhysicalRemote &&
+                        Number.isFinite(appSetTemp) &&
+                        remoteSetTemp !== appSetTemp
+                    ) {
                         console.log(
                             `🔒 AC locked — remote setTemp ${remoteSetTemp} ignored, re-asserting ${appSetTemp}`
                         );
@@ -155,10 +187,19 @@ const processSchedulingDeviceData = async (device, payload) => {
                             setTemperature: appSetTemp,
                         };
                         updatedFields.push(`setTemperature(locked keep): ${appSetTemp}`);
+                    } else if (!fromPhysicalRemote) {
+                        updatedFields.push(
+                            `setTemperature(echo ignored): ${remoteSetTemp} source=${source || "none"}`
+                        );
                     }
-                } else {
+                } else if (fromPhysicalRemote) {
                     device.setTemperature = remoteSetTemp;
-                    updatedFields.push(`setTemperature: ${remoteSetTemp}`);
+                    updatedFields.push(`setTemperature(remote): ${remoteSetTemp}`);
+                } else {
+                    // Dashboard/schedule owns setpoint; ESP apply/sync echo is ignored
+                    updatedFields.push(
+                        `setTemperature(echo ignored): ${remoteSetTemp} source=${source || "none"}`
+                    );
                 }
             }
         }
@@ -177,8 +218,16 @@ const processSchedulingDeviceData = async (device, payload) => {
         });
     }
 
-    // Smoke is ESP boolean (not a threshold condition)
-    if (payload.smoke !== undefined || device.deviceType === "SMD") {
+
+    syncSmdSmokeDetectedFromAlert(device, alerts);
+
+    if (isSmd) {
+        payload.smokePct = device.espSmokePct;
+        payload.smokeDetected = device.espSmoke === true;
+    }
+
+    // Legacy boolean smoke for non-SMD
+    if (!isSmd && (payload.smoke !== undefined)) {
         const smokeDetected = device.espSmoke === true;
         device.smokeAlert = smokeDetected;
         if (smokeDetected && !alerts.some((a) => a.type === "smoke")) {
@@ -231,8 +280,7 @@ const processSchedulingDeviceData = async (device, payload) => {
                 sensorData.humidity = payload.humidity;
                 sensorData.AQI = payload.AQI;
             } else if (device.deviceType === "SMD") {
-                sensorData.AQI = payload.AQI;
-                sensorData.smoke = payload.smoke;
+                sensorData.smoke = device.espSmokePct ?? payload.smokePct ?? payload.smoke;
             } else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;

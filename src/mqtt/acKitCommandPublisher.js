@@ -16,6 +16,7 @@ const {
     stateToAckit,
 } = require("./acKitCommandMap");
 const { assertDeviceBrandCommand } = require("../services/ackitBrandService");
+const { markAcCommandSent } = require("./acCommandCooldown");
 
 function normalizeDeviceId(deviceId) {
     return String(deviceId || "")
@@ -66,6 +67,7 @@ function publishAcApply(deviceId, { key, value, state = null, temperature = null
         }
     });
 
+    markAcCommandSent(id);
     return true;
 }
 
@@ -103,6 +105,7 @@ function publishAcRemote(deviceId, { remote, state = null, temperature = null })
         }
     });
 
+    markAcCommandSent(id);
     return true;
 }
 
@@ -169,6 +172,8 @@ async function publishAcSettingsChanges(deviceId, changes, device) {
         if (!result.ok) return result;
     }
 
+    let needsTempReassert = false;
+
     if (changes.acMode !== undefined) {
         attempted = true;
         const key = modeToApplyKey(changes.acMode);
@@ -178,6 +183,8 @@ async function publishAcSettingsChanges(deviceId, changes, device) {
             temperature: currentTemp,
         });
         if (!result.ok) return result;
+        // Haier-style full-state IR blobs bake in capture-time temp — reassert desired
+        needsTempReassert = true;
     }
 
     if (changes.fanSpeed !== undefined) {
@@ -189,6 +196,7 @@ async function publishAcSettingsChanges(deviceId, changes, device) {
             temperature: currentTemp,
         });
         if (!result.ok) return result;
+        needsTempReassert = true;
     }
 
     if (typeof changes.acLocked === "boolean") {
@@ -204,6 +212,22 @@ async function publishAcSettingsChanges(deviceId, changes, device) {
                 status: 503,
                 message: "MQTT broker unavailable. Could not reach the device.",
             };
+        }
+    }
+
+    // After mode/fan IR, always send temp.* again so AC does not keep blob's baked-in °C
+    if (
+        needsTempReassert &&
+        changes.setTemperature === undefined &&
+        Number.isFinite(currentTemp)
+    ) {
+        const key = temperatureToApplyKey(currentTemp);
+        if (key) {
+            const result = await publishAcApplyFromBrand(device, key, {
+                state,
+                temperature: currentTemp,
+            });
+            if (!result.ok) return result;
         }
     }
 

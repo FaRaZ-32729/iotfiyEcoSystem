@@ -2,12 +2,12 @@
 const { z } = require("zod");
 
 const conditionSchema = z.object({
-    type: z.enum(["temperature", "humidity", "odour", "AQI", "gass", "voltage", "current"]),
+    type: z.enum(["temperature", "humidity", "odour", "AQI", "smoke", "waterLeak", "gass", "voltage", "current"]),
     operator: z.enum([">", "<", "="]),
     value: z.number()
 });
 
-const deviceTypeEnum = z.enum(["OD", "THD", "AQID", "GLD", "ED", "AC", "SMD"]);
+const deviceTypeEnum = z.enum(["OD", "THD", "AQID", "GLD", "ED", "AC", "SMD", "WLD"]);
 
 // ==================== CREATE DEVICE SCHEMA (Flat Fields) ====================
 const createDeviceSchema = z.object({
@@ -27,6 +27,7 @@ const createDeviceSchema = z.object({
     odourAlertAccess: z.boolean().optional(),
     aqiAlertAccess: z.boolean().optional(),
     smokeAlertAccess: z.boolean().optional(),
+    waterLeakAlertAccess: z.boolean().optional(),
     glAlertAccess: z.boolean().optional(),
     voltageAlertAccess: z.boolean().optional(),
     currentAlertAccess: z.boolean().optional(),
@@ -41,6 +42,15 @@ const createDeviceSchema = z.object({
         });
     }
 
+    // WLD is monitoring-only
+    if (data.deviceType === "WLD" && data.category !== "monitoring") {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["category"],
+            message: "Water Leakage Device (WLD) supports monitoring category only",
+        });
+    }
+
     // Trigger category hone par kam se kam ek alert access field hona chahiye (optional strictness)
     if (data.category === "trigger") {
         const hasAnyAccess =
@@ -49,6 +59,7 @@ const createDeviceSchema = z.object({
             data.odourAlertAccess !== undefined ||
             data.aqiAlertAccess !== undefined ||
             data.smokeAlertAccess !== undefined ||
+            data.waterLeakAlertAccess !== undefined ||
             data.glAlertAccess !== undefined ||
             data.voltageAlertAccess !== undefined ||
             data.currentAlertAccess !== undefined;
@@ -80,12 +91,21 @@ const updateDeviceSchema = z.object({
     odourAlertAccess: z.boolean().optional(),
     aqiAlertAccess: z.boolean().optional(),
     smokeAlertAccess: z.boolean().optional(),
+    waterLeakAlertAccess: z.boolean().optional(),
     glAlertAccess: z.boolean().optional(),
     voltageAlertAccess: z.boolean().optional(),
     currentAlertAccess: z.boolean().optional(),
 }).superRefine((data, ctx) => {
     if (data.deviceType || data.conditions) {
         validateDeviceConditions(data, ctx);
+    }
+
+    if (data.deviceType === "WLD" && data.category && data.category !== "monitoring") {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["category"],
+            message: "Water Leakage Device (WLD) supports monitoring category only",
+        });
     }
 });
 
@@ -97,11 +117,14 @@ const validateDeviceConditions = (data, ctx) => {
         OD: ["temperature", "humidity", "odour"],
         THD: ["temperature", "humidity"],
         AQID: ["temperature", "humidity", "AQI"],
-        SMD: ["AQI"],
+        SMD: ["smoke"],
+        // waterLeak = 1 means alert when ESP sends true
+        WLD: ["waterLeak"],
         GLD: ["temperature", "humidity", "gass"],
         ED: ["temperature", "humidity", "voltage", "current"],
-        // AC: no threshold conditions — health alert comes from ESP
-        AC: []
+        // AC / WLD: no threshold conditions — ESP drives alerts directly
+        AC: [],
+        WLD: [],
     };
 
     const allowed = requiredConditions[data.deviceType] || [];
