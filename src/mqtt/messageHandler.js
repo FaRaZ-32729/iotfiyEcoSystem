@@ -133,6 +133,13 @@ const setupMessageHandler = (client) => {
                     return;
                 }
 
+                // Capture previous status BEFORE update — needed to know if this is a
+                // real offline→online transition vs ESP re-publishing "online".
+                const previousDevice = await Device.findOne({ deviceId }).select(
+                    "status category"
+                );
+                const previousStatus = previousDevice?.status || null;
+
                 const updatedDevice = await Device.findOneAndUpdate(
                     { deviceId: deviceId },
                     { status: newStatus, lastSeen: new Date() },
@@ -141,6 +148,11 @@ const setupMessageHandler = (client) => {
 
                 if (updatedDevice) {
                     console.log(`✅ Database updated → Device ${deviceId} is now ${newStatus.toUpperCase()}`);
+                    console.log(
+                        `[AC-IR-DEBUG] status msg device=${deviceId} ` +
+                            `prev=${previousStatus || "null"} → next=${newStatus} ` +
+                            `category=${updatedDevice.category}`
+                    );
 
                     // Emit device status to frontend
                     if (global.io) {
@@ -174,9 +186,21 @@ const setupMessageHandler = (client) => {
                     }
 
                     // ==================== RECONCILIATION (Only Scheduling) ====================
+                    // DEBUG NOTE: previously this ran on EVERY "online" publish, even when
+                    // device was already online. That can re-fire power.on+temp during events.
                     if (newStatus === "online" && updatedDevice.category === "scheduling") {
+                        const wasAlreadyOnline = previousStatus === "online";
+                        console.log(
+                            `[AC-IR-DEBUG] reconcile candidate device=${deviceId} ` +
+                                `wasAlreadyOnline=${wasAlreadyOnline} ` +
+                                `(if true + IR fires, this is a likely beep-loop cause)`
+                        );
                         console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
-                        await reconcileMissedCommands(deviceId);
+                        await reconcileMissedCommands(deviceId, {
+                            reason: wasAlreadyOnline
+                                ? "status_online_already_online"
+                                : "status_offline_to_online",
+                        });
                     }
 
                 } else {

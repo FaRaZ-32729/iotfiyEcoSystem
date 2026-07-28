@@ -64,6 +64,10 @@ function publishAcApply(deviceId, { key, value, state = null, temperature = null
                     state || "-"
                 } temp=${temperature == null ? "-" : temperature}`
             );
+            console.log(
+                `[AC-IR-DEBUG] MQTT apply device=${id} key=${key} ` +
+                    `temp=${temperature == null ? "-" : temperature} at=${new Date().toISOString()}`
+            );
         }
     });
 

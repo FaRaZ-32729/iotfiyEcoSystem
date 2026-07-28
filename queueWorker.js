@@ -142,6 +142,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         const success = await runAcScheduledCommand(device, schedule, effectiveCommand, {
             durationSeconds,
             scheduleId: schedule?._id,
+            reason: `cron_worker_${jobType || "unknown"}`,
         });
 
         if (success) {

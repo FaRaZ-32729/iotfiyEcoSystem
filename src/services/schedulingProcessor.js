@@ -251,6 +251,10 @@ const processSchedulingDeviceData = async (device, payload) => {
     // Lock re-assert AFTER save so DB stays on app setpoint (Ackit MQTT)
     if (lockReassertCommand) {
         const { publishAcLockReassert } = require("./acScheduleHelper");
+        console.log(
+            `[AC-IR-DEBUG] lockReassert device=${device.deviceId} ` +
+                `temp=${lockReassertCommand.setTemperature} at=${new Date().toISOString()}`
+        );
         const ok = await publishAcLockReassert(device);
         if (ok) {
             console.log(`🔒 Lock re-assert command published for ${device.deviceId}`);

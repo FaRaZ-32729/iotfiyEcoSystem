@@ -510,7 +510,9 @@ const toggleScheduleStatus = async (req, res) => {
             console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
 
             // Call reconciliation to check if we should send ON command immediately
-            await reconcileMissedCommands(schedule.deviceId);
+            await reconcileMissedCommands(schedule.deviceId, {
+                reason: "schedule_toggled_active",
+            });
             reconciliationTriggered = true;
         }
 

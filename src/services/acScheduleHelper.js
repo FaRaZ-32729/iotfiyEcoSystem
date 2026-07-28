@@ -103,18 +103,31 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         command === "ON" && schedule?.setTemperature != null
             ? schedule.setTemperature
             : null;
+    const reason = options.reason || "unknown";
+
+    // DEBUG: every IR schedule path must log a reason — if you see this many
+    // times/min during an event, that caller is causing AC beeps / 24 flicker.
+    console.log(
+        `[AC-IR-DEBUG] runAcScheduledCommand device=${device.deviceId} ` +
+            `cmd=${command} temp=${setTemperature ?? "-"} reason=${reason} ` +
+            `at=${new Date().toISOString()}`
+    );
 
     const result = await publishAcMqttCommand(device, command, setTemperature);
 
     if (result?.ok) {
         await applyAcScheduleState(device, command, setTemperature);
         emitAcDeviceLive(device);
+        console.log(
+            `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}`
+        );
         return true;
     }
 
     console.warn(
         `AC schedule MQTT failed for ${device.deviceId}:`,
-        result?.message || "unknown"
+        result?.message || "unknown",
+        `reason=${reason}`
     );
     return false;
 };

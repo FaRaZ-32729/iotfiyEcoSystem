@@ -62,6 +62,7 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
                     const success = await runAcScheduledCommand(device, fakeSchedule, command, {
                         scheduleId: jobId,
                         isImmediate: true,
+                        reason: "immediate_on_create_inside_window",
                     });
                     if (success) {
                         console.log(`✅ Immediate AC ${command} sent to ${data.deviceId}`);

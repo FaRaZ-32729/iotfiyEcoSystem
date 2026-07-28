@@ -4,8 +4,9 @@ const Device = require("../models/deviceModel");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const { runAcScheduledCommand } = require("./acScheduleHelper");
 
-const reconcileMissedCommands = async (deviceId) => {
+const reconcileMissedCommands = async (deviceId, options = {}) => {
     try {
+        const reason = options.reason || "reconcile_unspecified";
         const now = new Date();
 
         const currentHour = String(now.getUTCHours()).padStart(2, '0');
@@ -19,6 +20,10 @@ const reconcileMissedCommands = async (deviceId) => {
 
         const today = now.toISOString().split('T')[0];
 
+        console.log(
+            `[AC-IR-DEBUG] reconcileMissedCommands device=${deviceId} ` +
+                `reason=${reason} utc=${currentTime} day=${utcDay}`
+        );
         console.log(`🔍 Reconciling at UTC ${currentTime} | Day: ${utcDay} | Device: ${deviceId}`);
 
         const device = await Device.findOne({ deviceId });
@@ -100,6 +105,7 @@ const reconcileMissedCommands = async (deviceId) => {
             await runAcScheduledCommand(device, activeSchedule, eventCommand, {
                 scheduleId: activeSchedule._id,
                 durationSeconds: eventCommand === "ON" ? durationSeconds : null,
+                reason: `reconcile:${reason}`,
             });
             return;
         }
