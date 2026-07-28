@@ -186,21 +186,27 @@ const setupMessageHandler = (client) => {
                     }
 
                     // ==================== RECONCILIATION (Only Scheduling) ====================
-                    // DEBUG NOTE: previously this ran on EVERY "online" publish, even when
-                    // device was already online. That can re-fire power.on+temp during events.
+                    // Only on real offline→online. Re-publishing "online" while already
+                    // online was re-firing power.on+temp during active events (AC beep loop).
                     if (newStatus === "online" && updatedDevice.category === "scheduling") {
                         const wasAlreadyOnline = previousStatus === "online";
-                        console.log(
-                            `[AC-IR-DEBUG] reconcile candidate device=${deviceId} ` +
-                                `wasAlreadyOnline=${wasAlreadyOnline} ` +
-                                `(if true + IR fires, this is a likely beep-loop cause)`
-                        );
-                        console.log(`🔄 Triggering reconciliation for Scheduling device: ${deviceId}`);
-                        await reconcileMissedCommands(deviceId, {
-                            reason: wasAlreadyOnline
-                                ? "status_online_already_online"
-                                : "status_offline_to_online",
-                        });
+                        if (wasAlreadyOnline) {
+                            console.log(
+                                `[AC-IR-DEBUG] skip reconcile device=${deviceId} ` +
+                                    `reason=already_online (no IR)`
+                            );
+                        } else {
+                            console.log(
+                                `[AC-IR-DEBUG] reconcile device=${deviceId} ` +
+                                    `reason=status_offline_to_online`
+                            );
+                            console.log(
+                                `🔄 Triggering reconciliation for Scheduling device: ${deviceId}`
+                            );
+                            await reconcileMissedCommands(deviceId, {
+                                reason: "status_offline_to_online",
+                            });
+                        }
                     }
 
                 } else {
