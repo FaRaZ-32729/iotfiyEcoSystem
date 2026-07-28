@@ -104,19 +104,88 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             ? schedule.setTemperature
             : null;
     const reason = options.reason || "unknown";
+    const cmd = String(command || "").toUpperCase();
+    const currentState = String(device.state || "").toUpperCase();
+    const currentTemp = Number(device.setTemperature);
+    const targetTemp =
+        setTemperature != null && Number.isFinite(Number(setTemperature))
+            ? Number(setTemperature)
+            : null;
 
-    // DEBUG: every IR schedule path must log a reason — if you see this many
-    // times/min during an event, that caller is causing AC beeps / 24 flicker.
     console.log(
         `[AC-IR-DEBUG] runAcScheduledCommand device=${device.deviceId} ` +
-            `cmd=${command} temp=${setTemperature ?? "-"} reason=${reason} ` +
-            `at=${new Date().toISOString()}`
+            `cmd=${cmd} temp=${targetTemp ?? "-"} reason=${reason} ` +
+            `deviceState=${currentState} deviceTemp=${
+                Number.isFinite(currentTemp) ? currentTemp : "-"
+            } at=${new Date().toISOString()}`
     );
 
-    const result = await publishAcMqttCommand(device, command, setTemperature);
+    // Already matches desired schedule state → do NOT re-TX power.on.
+    // Re-sending power.on causes physical AC to briefly jump to the blob's
+    // baked-in capture temp (often 24) before temp.N corrects it.
+    if (
+        cmd === "ON" &&
+        currentState === "ON" &&
+        targetTemp != null &&
+        Number.isFinite(currentTemp) &&
+        currentTemp === targetTemp
+    ) {
+        console.log(
+            `[AC-IR-DEBUG] skip IR device=${device.deviceId} ` +
+                `reason=already_on_matching_temp_${targetTemp} (no power.on)`
+        );
+        await applyAcScheduleState(device, cmd, targetTemp);
+        emitAcDeviceLive(device);
+        return true;
+    }
+
+    if (cmd === "OFF" && currentState === "OFF") {
+        console.log(
+            `[AC-IR-DEBUG] skip IR device=${device.deviceId} reason=already_off`
+        );
+        await applyAcScheduleState(device, cmd, null);
+        emitAcDeviceLive(device);
+        return true;
+    }
+
+    // Already ON but wrong temp → only temp.* (avoid power.on baked-temp flash)
+    if (cmd === "ON" && currentState === "ON" && targetTemp != null) {
+        console.log(
+            `[AC-IR-DEBUG] temp-only IR device=${device.deviceId} ` +
+                `from=${currentTemp} to=${targetTemp} (skip power.on)`
+        );
+        const key = temperatureToApplyKey(targetTemp);
+        if (!key) {
+            console.warn(
+                `AC schedule invalid temp for ${device.deviceId}:`,
+                targetTemp
+            );
+            return false;
+        }
+        const result = await publishAcApplyFromBrand(device, key, {
+            state: "on",
+            temperature: targetTemp,
+        });
+        if (result?.ok) {
+            await applyAcScheduleState(device, cmd, targetTemp);
+            emitAcDeviceLive(device);
+            console.log(
+                `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason} mode=temp_only`
+            );
+            return true;
+        }
+        console.warn(
+            `AC schedule MQTT failed for ${device.deviceId}:`,
+            result?.message || "unknown",
+            `reason=${reason}`
+        );
+        return false;
+    }
+
+    const result = await publishAcMqttCommand(device, cmd, targetTemp);
 
     if (result?.ok) {
-        await applyAcScheduleState(device, command, setTemperature);
+        await applyAcScheduleState(device, cmd, targetTemp);
         emitAcDeviceLive(device);
         console.log(
             `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}`
