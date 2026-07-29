@@ -211,6 +211,12 @@ const processTriggerDeviceData = async (device, payload) => {
                 sensorData.AQI = payload.AQI;
             } else if (device.deviceType === "SMD") {
                 sensorData.smoke = device.espSmokePct ?? payload.smokePct ?? payload.smoke;
+            } else if (device.deviceType === "WLD") {
+                sensorData.waterLeak = device.espWaterLeak === true;
+            } else if (device.deviceType === "GLD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.gass = payload.gass ?? device.espGL;
             } else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;

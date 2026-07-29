@@ -22,6 +22,19 @@ const multiDBConnections = () => {
     connections["AQID"] = mongoose.createConnection(process.env.MONGODB_AQID_URL, options);
     connections["ED"] = mongoose.createConnection(process.env.MONGODB_ED_URL, options);
 
+    // New device-type clusters (optional until URLs are set)
+    const optionalTypes = ["SMD", "WLD", "GLD", "AC"];
+    for (const type of optionalTypes) {
+        const url = process.env[`MONGODB_${type}_URL`];
+        if (url) {
+            connections[type] = mongoose.createConnection(url, options);
+        } else {
+            console.warn(
+                `⚠️ MONGODB_${type}_URL not set — ${type} sensor series will not be saved/queried`
+            );
+        }
+    }
+
     // Connection Logs
     Object.keys(connections).forEach(type => {
         connections[type].on('connected', () => {

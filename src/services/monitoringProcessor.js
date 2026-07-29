@@ -120,6 +120,11 @@ const processMonitoringDeviceData = async (device, payload) => {
             else if (device.deviceType === "WLD") {
                 sensorData.waterLeak = device.espWaterLeak === true;
             }
+            else if (device.deviceType === "GLD") {
+                sensorData.temperature = payload.temperature;
+                sensorData.humidity = payload.humidity;
+                sensorData.gass = payload.gass ?? device.espGL;
+            }
             else if (device.deviceType === "ED") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;
