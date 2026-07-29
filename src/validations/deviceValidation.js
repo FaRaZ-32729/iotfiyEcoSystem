@@ -113,24 +113,29 @@ const updateDeviceSchema = z.object({
 const validateDeviceConditions = (data, ctx) => {
     if (!data.deviceType) return;
 
+    // Required condition types per device. ED temp/humidity are optional (user may leave empty).
     const requiredConditions = {
         OD: ["temperature", "humidity", "odour"],
         THD: ["temperature", "humidity"],
         AQID: ["temperature", "humidity", "AQI"],
         SMD: ["smoke"],
-        // waterLeak = 1 means alert when ESP sends true
-        WLD: ["waterLeak"],
         GLD: ["temperature", "humidity", "gass"],
-        ED: ["temperature", "humidity", "voltage", "current"],
+        ED: ["voltage", "current"],
         // AC / WLD: no threshold conditions — ESP drives alerts directly
         AC: [],
         WLD: [],
     };
 
-    const allowed = requiredConditions[data.deviceType] || [];
+    const optionalConditions = {
+        ED: ["temperature", "humidity"],
+    };
+
+    const required = requiredConditions[data.deviceType] || [];
+    const optional = optionalConditions[data.deviceType] || [];
+    const allowed = [...required, ...optional];
     const providedTypes = (data.conditions || []).map(c => c.type);
 
-    for (const condition of allowed) {
+    for (const condition of required) {
         if (!providedTypes.includes(condition)) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
