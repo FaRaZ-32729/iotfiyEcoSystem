@@ -167,28 +167,21 @@ const setupMessageHandler = (client) => {
                     let eventData = null;
 
                     if (updatedDevice.category === "scheduling") {
-                        const { emitDeviceSchedule } = require("../services/emitDeviceSchedule");
-                        eventData = await emitDeviceSchedule(deviceId, {
-                            deviceStatus: newStatus,
-                            message: newStatus === "offline"
-                                ? "Device is currently offline. Showing last known event."
-                                : undefined,
-                        });
+                        eventData = await getCurrentOrNextScheduleData(deviceId);
                     }
                     else if (updatedDevice.category === "trigger") {
                         eventData = await getCurrentOrNextTriggerEventData(deviceId);
-                        if (eventData && global.io) {
-                            global.io.emit(`device/${deviceId}/schedule`, {
-                                ...eventData,
-                                deviceStatus: newStatus,
-                                message: newStatus === "offline"
-                                    ? "Device is currently offline. Showing last known event."
-                                    : undefined
-                            });
-                        }
                     }
 
-                    if (eventData) {
+                    if (eventData && global.io) {
+                        global.io.emit(`device/${deviceId}/schedule`, {
+                            ...eventData,
+                            deviceStatus: newStatus,
+                            message: newStatus === "offline"
+                                ? "Device is currently offline. Showing last known event."
+                                : undefined
+                        });
+
                         console.log(`📡 Sent ${updatedDevice.category} event for device ${deviceId} | Status: ${newStatus}`);
                     }
 

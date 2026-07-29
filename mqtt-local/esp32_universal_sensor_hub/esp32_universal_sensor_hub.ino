@@ -18,7 +18,7 @@ const int mqtt_port = 1883;
 const char* mqtt_user = "mqttuser";
 const char* mqtt_pass = "Growmore12345@";
 
-const char* deviceId = "E6SYLQ"; // TDCategoryScheduling — scheduling
+const char* deviceId = "IALXIK"; // TDCategoryScheduling — scheduling
 
 WiFiClient espClient;
 PubSubClient client(espClient);
