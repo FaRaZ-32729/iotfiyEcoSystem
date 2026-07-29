@@ -167,21 +167,28 @@ const setupMessageHandler = (client) => {
                     let eventData = null;
 
                     if (updatedDevice.category === "scheduling") {
-                        eventData = await getCurrentOrNextScheduleData(deviceId);
-                    }
-                    else if (updatedDevice.category === "trigger") {
-                        eventData = await getCurrentOrNextTriggerEventData(deviceId);
-                    }
-
-                    if (eventData && global.io) {
-                        global.io.emit(`device/${deviceId}/schedule`, {
-                            ...eventData,
+                        const { emitDeviceSchedule } = require("../services/emitDeviceSchedule");
+                        eventData = await emitDeviceSchedule(deviceId, {
                             deviceStatus: newStatus,
                             message: newStatus === "offline"
                                 ? "Device is currently offline. Showing last known event."
-                                : undefined
+                                : undefined,
                         });
+                    }
+                    else if (updatedDevice.category === "trigger") {
+                        eventData = await getCurrentOrNextTriggerEventData(deviceId);
+                        if (eventData && global.io) {
+                            global.io.emit(`device/${deviceId}/schedule`, {
+                                ...eventData,
+                                deviceStatus: newStatus,
+                                message: newStatus === "offline"
+                                    ? "Device is currently offline. Showing last known event."
+                                    : undefined
+                            });
+                        }
+                    }
 
+                    if (eventData) {
                         console.log(`📡 Sent ${updatedDevice.category} event for device ${deviceId} | Status: ${newStatus}`);
                     }
 

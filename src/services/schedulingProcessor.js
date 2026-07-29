@@ -345,6 +345,16 @@ const processSchedulingDeviceData = async (device, payload) => {
         console.warn(`⚠️ Socket.io not initialized - cannot send live data`);
     }
 
+    // Live CURRENT/NEXT for device card footer (MQTT-driven)
+    try {
+        const { emitDeviceSchedule } = require("./emitDeviceSchedule");
+        await emitDeviceSchedule(device.deviceId, {
+            deviceStatus: device.status,
+        });
+    } catch (e) {
+        console.warn(`schedule emit failed for ${device.deviceId}:`, e.message);
+    }
+
     console.log(`✅ Scheduling data processing completed for ${device.deviceId}\n`);
 };
 

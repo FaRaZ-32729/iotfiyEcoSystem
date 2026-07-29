@@ -151,6 +151,13 @@ const createSchedule = async (req, res) => {
             endCron
         );
 
+        // Push live CURRENT/NEXT to dashboard immediately after create
+        try {
+            const { emitDeviceSchedule } = require("../services/emitDeviceSchedule");
+            await emitDeviceSchedule(deviceId);
+        } catch (e) {
+            console.warn("schedule emit after create failed:", e.message);
+        }
 
         res.status(201).json({
             success: true,
