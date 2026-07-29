@@ -182,6 +182,13 @@ const setupMessageHandler = (client) => {
                                 : undefined
                         });
 
+                        console.log(
+                            `[SCHEDULE-DEBUG][MQTT-STATUS] emit schedule device=${deviceId} ` +
+                                `status=${newStatus} type=${eventData.type} ` +
+                                `eventId=${eventData.event?._id || "none"} ` +
+                                `category=${updatedDevice.category}`
+                        );
+
                         console.log(`📡 Sent ${updatedDevice.category} event for device ${deviceId} | Status: ${newStatus}`);
                     }
 
