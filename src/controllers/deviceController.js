@@ -852,7 +852,7 @@ const manualButtonForTriggerDevice = async (req, res) => {
 };
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
-const VALID_FAN_SPEEDS = ["Low", "Medium", "Ultra", "Turbo"];
+const VALID_FAN_SPEEDS = ["Low", "Medium", "High", "Ultra", "Turbo"];
 
 /**
  * PUT /device/ac-settings/:deviceId

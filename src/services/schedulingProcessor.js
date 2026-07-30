@@ -4,7 +4,7 @@ const sensorModel = require("../models/sensorModel");
 const { isWithinAcCommandCooldown } = require("../mqtt/acCommandCooldown");
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
-const VALID_FAN_SPEEDS = ["Low", "Medium", "Ultra", "Turbo"];
+const VALID_FAN_SPEEDS = ["Low", "Medium", "High", "Ultra", "Turbo"];
 /** Assumed mains voltage for AC power calc (P = I × V). ESP sends current only. */
 const AC_ASSUMED_VOLTAGE = 225;
 
