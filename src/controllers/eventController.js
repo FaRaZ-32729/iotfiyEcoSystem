@@ -249,13 +249,30 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
             status: "ACTIVE"
         }).sort({ startTime: 1 });
 
+        console.log(
+            `[SCHEDULE-DEBUG][LOOKUP] device=${deviceId} utcNow=${currentDay} ${currentTime} ` +
+                `activeEvents=${schedules.length}`
+        );
+        for (const sch of schedules) {
+            console.log(
+                `[SCHEDULE-DEBUG][LOOKUP]  event=${sch._id} ` +
+                    `${sch.startTime}-${sch.endTime} days=${JSON.stringify(sch.days)} ` +
+                    `recurring=${sch.isRecurring} overnight=${sch.isOvernight} status=${sch.status}`
+            );
+        }
+
         let currentEvent = null;
         let nextEvent = null;
 
         for (const sch of schedules) {
             const { startTime, endTime, days, isOvernight, isRecurring } = sch;
 
-            if (isRecurring && !days.includes(currentDay)) continue;
+            if (isRecurring && !days.includes(currentDay)) {
+                console.log(
+                    `[SCHEDULE-DEBUG][LOOKUP]  skip ${sch._id} — day mismatch (need ${currentDay})`
+                );
+                continue;
+            }
 
             let isActiveNow = false;
 
@@ -302,6 +319,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
 
             const remainingMinutes = Math.floor((endDate - now) / (1000 * 60));
 
+            console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
             return {
                 type: "CURRENT",
                 event: currentEvent,
@@ -314,6 +332,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
         else if (nextEvent) {
             const totalDuration = calculateTotalDuration(nextEvent.startTime, nextEvent.endTime);
 
+            console.log(`[SCHEDULE-DEBUG][LOOKUP] → NEXT event=${nextEvent._id}`);
             return {
                 type: "NEXT",
                 event: nextEvent,
@@ -322,6 +341,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
             };
         }
         else {
+            console.log(`[SCHEDULE-DEBUG][LOOKUP] → NO_EVENT for ${deviceId}`);
             return {
                 type: "NO_EVENT",
                 event: null,

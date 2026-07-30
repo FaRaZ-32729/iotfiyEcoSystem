@@ -1,31 +1,40 @@
 /*
- * IoTify THD SCHEDULING only — Hostinger live
- * Device: E6SYLQ  (TDCategoryScheduling)
- * Payload: temperature, humidity, state
- * Listens: iotify/commands/E6SYLQ/control  { "command": "ON"|"OFF" }
+ * IoTify SMD SCHEDULING — Hostinger live
+ * Device: 0OBNGI  (SMDSch)
+ * Payload: smoke (%), state
+ * Status heartbeat every 30s (needed for live CURRENT event on dashboard)
+ * Listens: iotify/commands/0OBNGI/control  { "command": "ON"|"OFF" }
  * Serial: s = send now
+ *         m = force high smoke next packets
+ *         n = normal smoke again
  */
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "FaRaZ";
-const char* password = "faraz32729";
+const char* ssid = "IOTFIY8";
+const char* password = "12345678";
 
-const char* mqtt_server = "72.62.146.208"; // ecosystem.iotfiysolutions.com
+const char* mqtt_server = "ecosystem.iotfiysolutions.com";
+// const char* mqtt_server = "72.62.146.208"; // use if DNS fails (rc=-2)
 const int mqtt_port = 1883;
 const char* mqtt_user = "mqttuser";
 const char* mqtt_pass = "Growmore12345@";
 
-const char* deviceId = "IALXIK"; // TDCategoryScheduling — scheduling
+const char* deviceId = "0OBNGI"; // SMDSch
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+unsigned long lastDataSend = 0;
+unsigned long lastStatusSend = 0;
+unsigned long lastReconnectAttempt = 0;
 bool deviceEnabled = false;
-unsigned long lastData = 0;
-unsigned long lastReconnect = 0;
+bool forceHighSmoke = false;
+
+const unsigned long DATA_INTERVAL_MS = 15000;
+const unsigned long STATUS_INTERVAL_MS = 30000;
 
 String dataTopic()    { return String("iotify/devices/") + deviceId + "/data"; }
 String statusTopic()  { return String("iotify/devices/") + deviceId + "/status"; }
@@ -45,18 +54,30 @@ void setupWiFi() {
   Serial.println(WiFi.localIP());
 }
 
-void publishData() {
-  float temperature = 24.0 + random(0, 60) / 10.0;
-  float humidity = 45.0 + random(0, 200) / 10.0;
+void sendOnlineStatus() {
+  bool ok = client.publish(statusTopic().c_str(), "online", true);
+  Serial.println(ok ? "status → online" : "status FAILED");
+}
 
-  StaticJsonDocument<160> doc;
-  doc["temperature"] = temperature;
-  doc["humidity"] = humidity;
+void sendCurrentState() {
+  StaticJsonDocument<96> doc;
+  doc["state"] = deviceEnabled ? "ON" : "OFF";
+  char buf[96];
+  serializeJson(doc, buf);
+  client.publish(dataTopic().c_str(), buf);
+  Serial.print("state → ");
+  Serial.println(deviceEnabled ? "ON" : "OFF");
+}
+
+void publishSensorData() {
+  int smoke = forceHighSmoke ? (70 + random(0, 25)) : random(5, 40);
+
+  StaticJsonDocument<128> doc;
+  doc["smoke"] = smoke;
   doc["state"] = deviceEnabled ? "ON" : "OFF";
 
-  char buf[160];
+  char buf[128];
   serializeJson(doc, buf);
-
   bool ok = client.publish(dataTopic().c_str(), buf);
   Serial.print(ok ? "OK  " : "FAIL ");
   Serial.print(deviceId);
@@ -65,19 +86,18 @@ void publishData() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  String msg;
-  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
+  String message;
+  for (unsigned int i = 0; i < length; i++) message += (char)payload[i];
 
   Serial.print("CMD ");
   Serial.print(topic);
   Serial.print(" → ");
-  Serial.println(msg);
+  Serial.println(message);
 
-  StaticJsonDocument<192> doc;
-  if (deserializeJson(doc, msg)) {
-    Serial.println("bad JSON");
-    return;
-  }
+  if (strstr(topic, "/control") == NULL) return;
+
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, message)) return;
 
   String command = doc["command"] | "";
   command.toUpperCase();
@@ -89,18 +109,20 @@ void callback(char* topic, byte* payload, unsigned int length) {
     deviceEnabled = false;
     Serial.println("STATE → OFF");
   } else {
-    Serial.println("unknown command");
     return;
   }
 
-  publishData();
+  sendCurrentState();
+  delay(30);
+  publishSensorData();
 }
 
 void reconnect() {
-  if (millis() - lastReconnect < 5000) return;
-  lastReconnect = millis();
+  unsigned long now = millis();
+  if (now - lastReconnectAttempt < 5000) return;
+  lastReconnectAttempt = now;
 
-  String clientId = "ESP32-THD-SCH-" + String(random(0xffff), HEX);
+  String clientId = "ESP32-SMD-SCH-" + String(random(0xffff), HEX);
   String will = statusTopic();
 
   Serial.println("MQTT connecting...");
@@ -110,9 +132,10 @@ void reconnect() {
     return;
   }
 
-  client.publish(will.c_str(), "online", true);
+  Serial.println("MQTT connected");
+  sendOnlineStatus();
   client.subscribe(controlTopic().c_str(), 1);
-  Serial.println("MQTT connected + online + subscribed control");
+  Serial.println("sub control");
 }
 
 void setup() {
@@ -120,12 +143,24 @@ void setup() {
   delay(500);
   randomSeed(millis());
 
-  Serial.println("\nTHD SCHEDULING only → E6SYLQ");
-  setupWiFi();
+  Serial.println("\nSMD SCHEDULING → 0OBNGI");
+  Serial.println("fields: smoke, state");
+  Serial.println("status heartbeat: 30s");
+  Serial.println("serial: s=send  m=high smoke  n=normal\n");
 
+  setupWiFi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   client.setKeepAlive(60);
+
+  WiFi.onEvent([](WiFiEvent_t event) {
+    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      Serial.println("WiFi lost → offline");
+      if (client.connected()) {
+        client.publish(statusTopic().c_str(), "offline", true);
+      }
+    }
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 }
 
 void loop() {
@@ -135,12 +170,27 @@ void loop() {
 
   if (Serial.available()) {
     char c = (char)Serial.read();
-    if (c == 's' || c == 'S') publishData();
+    if (c == 's' || c == 'S') {
+      publishSensorData();
+    } else if (c == 'm' || c == 'M') {
+      forceHighSmoke = true;
+      Serial.println("next smoke → HIGH");
+    } else if (c == 'n' || c == 'N') {
+      forceHighSmoke = false;
+      Serial.println("next smoke → normal");
+    }
   }
 
-  if (client.connected() && millis() - lastData > 15000) {
-    lastData = millis();
-    publishData();
+  unsigned long now = millis();
+
+  if (client.connected() && now - lastDataSend >= DATA_INTERVAL_MS) {
+    lastDataSend = now;
+    publishSensorData();
+  }
+
+  if (client.connected() && now - lastStatusSend >= STATUS_INTERVAL_MS) {
+    lastStatusSend = now;
+    sendOnlineStatus();
   }
 
   delay(20);

@@ -286,7 +286,13 @@ const processSchedulingDeviceData = async (device, payload) => {
             } else if (device.deviceType === "SMD") {
                 sensorData.smoke = device.espSmokePct ?? payload.smokePct ?? payload.smoke;
             } else if (device.deviceType === "WLD") {
-                sensorData.waterLeak = device.espWaterLeak === true;
+                if (device.espWaterLeak !== true) {
+                    console.log(`⏭️ WLD skip Mongo save — no leak (device ${device.deviceId})`);
+                } else {
+                    sensorData.waterLeak = true;
+                    await SensorModel.create(sensorData);
+                    console.log(`💾 Sensor data saved in ${device.deviceType} Cluster (leak only)`);
+                }
             } else if (device.deviceType === "GLD") {
                 sensorData.temperature = payload.temperature;
                 sensorData.humidity = payload.humidity;
@@ -303,8 +309,10 @@ const processSchedulingDeviceData = async (device, payload) => {
                 if (device.espPower != null) sensorData.voltage = device.espPower; // reuse field for W if needed
             }
 
-            await SensorModel.create(sensorData);
-            console.log(`💾 Sensor data saved in ${device.deviceType} Cluster`);
+            if (device.deviceType !== "WLD") {
+                await SensorModel.create(sensorData);
+                console.log(`💾 Sensor data saved in ${device.deviceType} Cluster`);
+            }
         }
     } catch (err) {
         console.error(`❌ Failed to save sensor data for ${device.deviceType}:`, err.message);
