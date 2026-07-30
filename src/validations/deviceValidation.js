@@ -113,21 +113,22 @@ const updateDeviceSchema = z.object({
 const validateDeviceConditions = (data, ctx) => {
     if (!data.deviceType) return;
 
-    // Required condition types per device. ED temp/humidity are optional (user may leave empty).
+    // Required condition types per device.
+    // ED: current required; temperature/humidity/voltage optional (voltage defaults to 225 if omitted).
     const requiredConditions = {
         OD: ["temperature", "humidity", "odour"],
         THD: ["temperature", "humidity"],
         AQID: ["temperature", "humidity", "AQI"],
         SMD: ["smoke"],
         GLD: ["temperature", "humidity", "gass"],
-        ED: ["voltage", "current"],
+        ED: ["current"],
         // AC / WLD: no threshold conditions — ESP drives alerts directly
         AC: [],
         WLD: [],
     };
 
     const optionalConditions = {
-        ED: ["temperature", "humidity"],
+        ED: ["temperature", "humidity", "voltage"],
     };
 
     const required = requiredConditions[data.deviceType] || [];
