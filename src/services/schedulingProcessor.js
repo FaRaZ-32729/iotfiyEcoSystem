@@ -83,17 +83,20 @@ const processSchedulingDeviceData = async (device, payload) => {
     let lockReassertCommand = null;
 
     if (isAc) {
-        // Health: ESP sends acHealth true/false OR acHealthAlert
+        // Health: ESP may send bool, 1/0, or "true"/"false"/"1"/"0"
+        const parseEspFlag = (v) =>
+            v === true ||
+            v === 1 ||
+            v === "1" ||
+            String(v).toLowerCase() === "true";
+
         if (payload.acHealth !== undefined) {
-            const healthy =
-                payload.acHealth === true ||
-                payload.acHealth === "true" ||
-                payload.acHealth === 1 ||
-                payload.acHealth === "1";
+            const healthy = parseEspFlag(payload.acHealth);
             device.acHealthAlert = !healthy;
             updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
         } else if (payload.acHealthAlert !== undefined) {
-            device.acHealthAlert = !!payload.acHealthAlert;
+            // Do not use !!value — "0" / "false" are truthy strings
+            device.acHealthAlert = parseEspFlag(payload.acHealthAlert);
             updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
         }
 
