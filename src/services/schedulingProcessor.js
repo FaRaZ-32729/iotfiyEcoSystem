@@ -1,7 +1,6 @@
 // src/services/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 const sensorModel = require("../models/sensorModel");
-const { isWithinAcCommandCooldown } = require("../mqtt/acCommandCooldown");
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
 const VALID_FAN_SPEEDS = ["Low", "Medium", "High", "Ultra", "Turbo"];
@@ -149,11 +148,11 @@ const processSchedulingDeviceData = async (device, payload) => {
         }
 
         // Setpoint: prefer setTemperature; "temperature" is ESP alias for setpoint.
-        // Only PHYSICAL REMOTE reports may change Mongo setpoint.
+        // Only PHYSICAL REMOTE (source:"remote") may change Mongo setpoint.
         // apply/sync/heartbeat echoes must NOT overwrite dashboard/schedule setpoint
-        // (fixes 21→24→21 flicker when ESP default/stale gReportedTemp leaks).
-        // Also ignore "remote" during cooldown after we sent apply — IR self-echo
-        // often looks like a remote press with baked-in capture temp (e.g. 24).
+        // (fixes 21↔24 flicker). ESP already mutes IR self-echo when unlocked (~3s),
+        // so we do NOT apply a backend cooldown here — that blocked real remote
+        // temps while mode/fan (no cooldown) still updated.
         const remoteSetpointRaw =
             payload.setTemperature !== undefined
                 ? payload.setTemperature
@@ -162,18 +161,10 @@ const processSchedulingDeviceData = async (device, payload) => {
             const remoteSetTemp = Number(remoteSetpointRaw);
             if (Number.isFinite(remoteSetTemp)) {
                 const source = String(payload.source || "").toLowerCase().trim();
-                const echoCooldown = isWithinAcCommandCooldown(device.deviceId);
-                let fromPhysicalRemote =
+                const fromPhysicalRemote =
                     source === "remote" ||
                     payload.fromRemote === true ||
                     payload.fromRemote === "true";
-
-                if (fromPhysicalRemote && echoCooldown) {
-                    fromPhysicalRemote = false;
-                    updatedFields.push(
-                        `setTemperature(remote echo ignored during apply cooldown): ${remoteSetTemp}`
-                    );
-                }
 
                 if (device.acLocked) {
                     const appSetTemp = Number(device.setTemperature);
@@ -196,12 +187,22 @@ const processSchedulingDeviceData = async (device, payload) => {
                         );
                     }
                 } else if (fromPhysicalRemote) {
+                    const prevTemp = device.setTemperature;
                     device.setTemperature = remoteSetTemp;
                     updatedFields.push(`setTemperature(remote): ${remoteSetTemp}`);
+                    console.log(
+                        `[AC-TEMP] ACCEPT remote device=${device.deviceId} ` +
+                            `unlocked setTemperature ${prevTemp} → ${remoteSetTemp}`
+                    );
                 } else {
                     // Dashboard/schedule owns setpoint; ESP apply/sync echo is ignored
                     updatedFields.push(
                         `setTemperature(echo ignored): ${remoteSetTemp} source=${source || "none"}`
+                    );
+                    console.log(
+                        `[AC-TEMP] IGNORE device=${device.deviceId} ` +
+                            `setTemperature=${remoteSetTemp} source=${source || "none"} ` +
+                            `(only source:remote updates UI setpoint when unlocked)`
                     );
                 }
             }
