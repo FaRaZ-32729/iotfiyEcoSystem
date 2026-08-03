@@ -68,7 +68,7 @@ const deviceSchema = new mongoose.Schema({
     },
     fanSpeed: {
         type: String,
-        enum: ["Low", "Medium", "Ultra", "Turbo"],
+        enum: ["Low", "Medium", "High", "Ultra", "Turbo"],
         default: "Low"
     },
     acLocked: { type: Boolean, default: false },

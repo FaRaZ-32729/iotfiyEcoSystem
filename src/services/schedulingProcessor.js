@@ -127,6 +127,7 @@ const processSchedulingDeviceData = async (device, payload) => {
         }
 
         // Mode / fan from device (only accept when unlocked)
+        // Unknown values: skip that field only — still save state/temp (no full save crash)
         if (payload.mode !== undefined || payload.acMode !== undefined) {
             const mode = String(payload.mode || payload.acMode).trim();
             if (VALID_AC_MODES.includes(mode)) {
@@ -134,6 +135,11 @@ const processSchedulingDeviceData = async (device, payload) => {
                     device.acMode = mode;
                     updatedFields.push(`acMode: ${mode}`);
                 }
+            } else {
+                updatedFields.push(`acMode(skipped invalid): ${mode}`);
+                console.log(
+                    `[AC-TEMP] SKIP invalid acMode="${mode}" device=${device.deviceId} — saving other fields`
+                );
             }
         }
 
@@ -144,6 +150,11 @@ const processSchedulingDeviceData = async (device, payload) => {
                     device.fanSpeed = speed;
                     updatedFields.push(`fanSpeed: ${speed}`);
                 }
+            } else {
+                updatedFields.push(`fanSpeed(skipped invalid): ${speed}`);
+                console.log(
+                    `[AC-TEMP] SKIP invalid fanSpeed="${speed}" device=${device.deviceId} — saving other fields`
+                );
             }
         }
 
