@@ -109,7 +109,8 @@ function publishAcRemote(deviceId, { remote, state = null, temperature = null })
         }
     });
 
-    markAcCommandSent(id);
+    // Do NOT markAcCommandSent here. Cooldown is only for IR apply self-echo.
+    // Lock/unlock was starting an 8s window that ignored real remote setTemperature.
     return true;
 }
 
