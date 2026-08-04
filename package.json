@@ -4,13 +4,15 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "concurrently --names \"SERVER,WORKER\" --prefix-colors \"blue,green\" \"nodemon server.js\" \"nodemon queueWorker.js\""
+    "start": "concurrently --names \"SERVER,WORKER\" --prefix-colors \"blue,green\" \"nodemon server.js\" \"nodemon queueWorker.js\"",
+    "rag:ingest": "node src/rag/ingestRagKnowledge.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.76.7",
     "concurrently": "^9.2.1",
