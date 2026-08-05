@@ -4,10 +4,10 @@
 A: An IoT platform to monitor venue sensors and control devices (including AC), with alerts, schedules, and triggers.
 
 **Q: Why is my device grey / controls disabled?**  
-A: The device is offline. Wait until status is online, or check power/Wi‑Fi/MQTT connectivity of the ESP.
+A: The device is offline. Wait until status is online, or check power/Wi-Fi/MQTT connectivity of the ESP.
 
 **Q: What does AC lock do?**  
-A: Lock keeps the AC on the app’s desired settings. Physical remote changes are reverted. Unlock allows the remote to update the dashboard.
+A: Lock keeps the AC on the app's desired settings. Physical remote changes are reverted. Unlock allows the remote to update the dashboard.
 
 **Q: Can I use Fan High?**  
 A: Yes — High is a supported fan speed (Low, Medium, High, Ultra, Turbo). The brand IR pack must include a High command for the unit to change.
@@ -15,7 +15,7 @@ A: Yes — High is a supported fan speed (Low, Medium, High, Ultra, Turbo). The 
 **Q: Temperature vs set temperature on AC?**  
 A: Set temperature is the AC setpoint the user chooses (16–30°C). Live room/vent sensors are separate metrics when present.
 
-**Q: Why is gas spelled “gass”?**  
+**Q: Why is gas spelled "gass"?**  
 A: In this app the gas-leakage alert key is stored and sent as `gass`.
 
 **Q: Water leak has no threshold — is that normal?**  
@@ -46,8 +46,13 @@ A: Open sidebar **Device Management**. The **Add Device** form is there. On that
 A: No. A manager can only **delete** their team member from **Users Management**. Only **admin** can set a manager Active/Inactive (suspend) from Management → **Managers** → click status → enter **suspension reason** when deactivating.
 
 **Q: Can I change my own Active/Inactive status?**  
-A: **No.** Nobody can change their own account status in this app. There is no self-service Active/Inactive control. Only an **admin** can change a **manager’s** status (Management → Managers → All Managers → click that manager’s status → suspension reason if deactivating). Managers and sub-users cannot flip Active/Inactive for themselves or for others (managers only delete team members).
+A: **No.** Nobody can change their own account status in this app. Only an **admin** can change a manager's status. Managers and sub-users cannot flip Active/Inactive for themselves or for others (managers only delete team members).
 
 **Q: How does admin Inactive a manager?**  
-A: Management → **Managers** → All Managers table → click **Active/Inactive** status on that manager (not yourself as a self-edit screen) → modal → write **suspension reason** → confirm. Deactivating also inactivates that manager’s sub-users. Managers must ask an admin; they cannot do this themselves.
+A: Management → **Managers** → All Managers table → click **Active/Inactive** status → modal → **suspension reason** → confirm.
 
+**Q: How many organizations does admin have in the application?**  
+A: Admin sees **all organizations** platform-wide (every manager's orgs). Eco assistant: getPlatformOverview or listMyOrganizations. UI: Admin → Management → Organizations tab. This is NOT personal subscription usage.
+
+**Q: How does admin perform OTA (Over The Air) firmware update?**  
+A: Admin sidebar → **OTA Management** (`/admin/management/ota`). **Upload firmware:** Device Type, Version ID, file (.bin / .ota / .hex), Upload firmware. **Start OTA:** Device Type, Version ID, select online devices, **Start OTA**. Admin-only — NOT manager Device Management.

@@ -108,12 +108,15 @@ async function listMyOrganizations(user) {
             .lean();
         return {
             count: orgs.length,
+            scope: "entire_application",
             organizations: orgs.map((o) => ({
                 id: String(o._id),
                 name: o.name,
                 ownerName: o.owner?.name || null,
                 ownerEmail: o.owner?.email || null,
             })),
+            instructionForAssistant:
+                "Admin sees ALL organizations in the app. Answer with the count immediately. Do NOT say admin lacks org data or redirect to subscription usage.",
         };
     }
 
@@ -864,6 +867,44 @@ function escapeRegex(s) {
     return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Admin: total orgs, venues, devices, managers in one call.
+ * Use for "how many organizations in my application?"
+ */
+async function getPlatformOverview(user) {
+    if (user.role !== "admin") {
+        return {
+            error:
+                "Platform-wide totals are for admin only. Use listMyOrganizations / listMyVenues / listMyDevices for your account scope.",
+        };
+    }
+
+    const [organizations, venues, devices, managers] = await Promise.all([
+        Organization.countDocuments({}),
+        Venue.countDocuments({}),
+        Device.countDocuments({}),
+        User.countDocuments({ role: "manager" }),
+    ]);
+
+    const orgList = await Organization.find({})
+        .select("name")
+        .sort({ name: 1 })
+        .lean();
+
+    return {
+        scope: "entire_application",
+        totals: {
+            organizations,
+            venues,
+            devices,
+            managers,
+        },
+        organizationNames: orgList.map((o) => o.name),
+        instructionForAssistant:
+            "Give the user the totals immediately. Admin has full read access to all orgs/venues/devices/managers. Never ask 'would you like me to provide that?' — just answer.",
+    };
+}
+
 const TOOL_IMPL = {
     listMyOrganizations: (user, args) => listMyOrganizations(user, args),
     listMyVenues: (user, args) => listMyVenues(user, args),
@@ -873,6 +914,7 @@ const TOOL_IMPL = {
     listMyTeamMembers: (user, args) => listMyTeamMembers(user, args),
     countMyTeamMembers: (user, args) => countMyTeamMembers(user, args),
     listAllManagers: (user, args) => listAllManagers(user, args),
+    getPlatformOverview: (user, args) => getPlatformOverview(user, args),
     getMySubscriptionUsage: (user, args) => getMySubscriptionUsage(user, args),
     listSubscriptionPlans: (user, args) => listSubscriptionPlans(user, args),
     searchHelpDocs: (user, args) => searchHelpDocs(user, args),
@@ -894,8 +936,18 @@ const AGENT_TOOLS = [
     {
         type: "function",
         function: {
+            name: "getPlatformOverview",
+            description:
+                "ADMIN ONLY. Total counts across the ENTIRE application: organizations, venues, devices, managers. REQUIRED when admin asks 'how many organizations/venues/devices in my application?' or platform totals. Returns count + org names.",
+            parameters: { type: "object", properties: {} },
+        },
+    },
+    {
+        type: "function",
+        function: {
             name: "listMyOrganizations",
-            description: "List organizations the logged-in user can access.",
+            description:
+                "List organizations the user can access. ADMIN: ALL organizations in the entire app (with owner). Manager: their orgs. REQUIRED for admin org count — NOT getMySubscriptionUsage.",
             parameters: { type: "object", properties: {} },
         },
     },
@@ -1043,7 +1095,7 @@ const AGENT_TOOLS = [
         function: {
             name: "searchHelpDocs",
             description:
-                "Search ecoSystem product help docs (how-to UI flows, roles/permissions, device rename, AC lock, alerts, OTA, plans, categories). Not for inventing menus. Prefer this for 'can I change device name' / permission questions.",
+                "REQUIRED for how-to UI questions: OTA (admin), Plan Management, device rename, permissions, admin flows. Admin OTA → search 'admin OTA management upload firmware start OTA'. Never guess OTA steps — search first.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1067,6 +1119,7 @@ module.exports = {
     listMyTeamMembers,
     countMyTeamMembers,
     listAllManagers,
+    getPlatformOverview,
     getMySubscriptionUsage,
     listSubscriptionPlans,
     searchHelpDocs,
