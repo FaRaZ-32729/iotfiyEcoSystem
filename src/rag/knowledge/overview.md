@@ -15,11 +15,14 @@ ecoSystem (IOTFIY ecoSystem) is an IoT monitoring and control platform for venue
 3. **Device** — belongs to one venue and has a type + category.
 
 ## Roles
-- **admin** — platform admin (plans, OTA, managers).
-- **manager** — owns organizations; full manage access to their orgs/venues/devices/users.
-- **user** — sub-user assigned to specific venues with permission **view** or **manage**.
+- **admin** — Plans, OTA, Managers (Active/Inactive). View-only Orgs/Venues/Devices tabs. Does **not** create/rename devices.
+- **manager** — CRUD orgs, venues, devices (including device name), team users. Cannot Active/Inactive managers.
+- **user + manage** — CRUD orgs, venues, devices (including device name). No Users Management / Subscription menus in current app.
+- **user + view** — read-only; cannot change device name or any records.
 
-View = read-only. Manage = create/edit devices, events, etc.
+See `roles-and-permissions.md` for the full matrix.
+
+View = read-only. Manage (on user) = create/edit/delete on management pages they can access.
 
 ## Device categories
 - **monitoring** — sense metrics and raise alert flags; no ON/OFF schedule UI.
@@ -30,4 +33,8 @@ Water Leakage devices (WLD) are monitoring-only.
 AC devices appear with scheduling-style controls on the dashboard.
 
 ## Getting help
-Ask about device types, what each alert means, how AC lock/fan/mode works, how schedules differ from triggers, or how org/venue/roles work.
+Ask about device types, alerts, AC lock/fan/mode, schedules vs triggers, how to add a device, or org/venue/roles.
+
+## How to create a device (short)
+Sidebar **Device Management** → **Add Device** form → select Organization, Venue, Device Type → configure conditions → select Category → if trigger, pick alert-access parameters → Save.  
+Do not route the user through Org Management → Venue Management first; those dropdowns are on the Add Device form.

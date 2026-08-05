@@ -1,9 +1,9 @@
 const RagChunk = require("../models/ragChunkModel");
 const {
-    getGeminiClient,
+    getOpenAIClient,
     getChatModelName,
     getEmbedModelName,
-} = require("./geminiClient");
+} = require("./openaiClient");
 
 const SYSTEM_PROMPT = `You are the friendly ecoSystem Support assistant for the IOTFIY ecoSystem IoT app.
 
@@ -43,36 +43,22 @@ function cosineSimilarity(a, b) {
 }
 
 async function embedText(text) {
-    const genAI = getGeminiClient();
-    const model = genAI.getGenerativeModel({ model: getEmbedModelName() });
-    const result = await model.embedContent({
-        content: { parts: [{ text: String(text || "").slice(0, 8000) }] },
-        taskType: "RETRIEVAL_QUERY",
+    const openai = getOpenAIClient();
+    const result = await openai.embeddings.create({
+        model: getEmbedModelName(),
+        input: String(text || "").slice(0, 8000),
     });
-    const values = result?.embedding?.values;
+    const values = result?.data?.[0]?.embedding;
     if (!values?.length) {
-        throw new Error("Empty embedding from Gemini");
+        throw new Error("Empty embedding from OpenAI");
     }
     return values;
 }
 
 async function embedDocument(text) {
-    const genAI = getGeminiClient();
-    const model = genAI.getGenerativeModel({ model: getEmbedModelName() });
-    const result = await model.embedContent({
-        content: { parts: [{ text: String(text || "").slice(0, 8000) }] },
-        taskType: "RETRIEVAL_DOCUMENT",
-    });
-    const values = result?.embedding?.values;
-    if (!values?.length) {
-        throw new Error("Empty embedding from Gemini");
-    }
-    return values;
+    return embedText(text);
 }
 
-/**
- * Retrieve top-k chunks by cosine similarity (fine for small knowledge bases).
- */
 async function retrieve(query, k = 5) {
     const queryEmbedding = await embedText(query);
     const chunks = await RagChunk.find({}).select("source title content embedding").lean();
@@ -95,7 +81,9 @@ async function retrieve(query, k = 5) {
 }
 
 function buildContext(chunks) {
-    if (!chunks.length) return "(No knowledge chunks retrieved. Knowledge base may be empty — run ingest.)";
+    if (!chunks.length) {
+        return "(No knowledge chunks retrieved. Knowledge base may be empty — run ingest.)";
+    }
     return chunks
         .map(
             (c, i) =>
@@ -117,8 +105,6 @@ function buildPrompt(q, context, history = []) {
 
 Formatting:
 - Use Markdown only: **bold**, ## headings, "- " bullets, and "1. 2. 3." numbered steps.
-- Example bullet: - **Smoke Device (SMD)**: Detects smoke and can alert on threshold.
-- Example steps: 1. Open Device Management 2. Choose type and category 3. Select venue
 - Prefer lists over paragraphs whenever listing devices, alerts, options, or steps.
 - Do NOT use markdown tables (| ... |).
 - Keep answers scannable.
@@ -139,9 +125,6 @@ function mapSources(chunks) {
     }));
 }
 
-/**
- * @param {{ message: string, history?: Array<{ role: string, text: string }> }} args
- */
 async function chat({ message, history = [] }) {
     const q = String(message || "").trim();
     if (!q) {
@@ -152,11 +135,15 @@ async function chat({ message, history = [] }) {
 
     const chunks = await retrieve(q, 5);
     const prompt = buildPrompt(q, buildContext(chunks), history);
-
-    const genAI = getGeminiClient();
-    const model = genAI.getGenerativeModel({ model: getChatModelName() });
-    const result = await model.generateContent(prompt);
-    const answer = result?.response?.text?.() || "Sorry, I could not generate an answer.";
+    const openai = getOpenAIClient();
+    const result = await openai.chat.completions.create({
+        model: getChatModelName(),
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.4,
+    });
+    const answer =
+        result?.choices?.[0]?.message?.content ||
+        "Sorry, I could not generate an answer.";
 
     return {
         answer: String(answer).trim(),
@@ -164,10 +151,6 @@ async function chat({ message, history = [] }) {
     };
 }
 
-/**
- * Stream answer tokens (async generator).
- * Yields: { type:'token', text } | { type:'done', sources } | { type:'error', message }
- */
 async function* chatStream({ message, history = [] }) {
     const q = String(message || "").trim();
     if (!q) {
@@ -178,17 +161,16 @@ async function* chatStream({ message, history = [] }) {
     try {
         const chunks = await retrieve(q, 5);
         const prompt = buildPrompt(q, buildContext(chunks), history);
-        const genAI = getGeminiClient();
-        const model = genAI.getGenerativeModel({ model: getChatModelName() });
-        const result = await model.generateContentStream(prompt);
+        const openai = getOpenAIClient();
+        const stream = await openai.chat.completions.create({
+            model: getChatModelName(),
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.4,
+            stream: true,
+        });
 
-        for await (const chunk of result.stream) {
-            let text = "";
-            try {
-                text = chunk.text();
-            } catch {
-                text = "";
-            }
+        for await (const part of stream) {
+            const text = part?.choices?.[0]?.delta?.content;
             if (text) {
                 yield { type: "token", text };
             }

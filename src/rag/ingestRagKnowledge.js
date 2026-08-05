@@ -1,10 +1,10 @@
 /**
- * Ingest markdown knowledge files → chunk → Gemini embed → Mongo rag_chunks.
+ * Ingest markdown knowledge files → chunk → OpenAI embed → Mongo rag_chunks.
  *
  * Usage (from ecoSystem-backend):
  *   node src/rag/ingestRagKnowledge.js
  *
- * Requires: GEMINI_API_KEY in .env, Mongo connected via MONGO_URI / same as server.
+ * Requires: OPENAI_API_KEY in .env, Mongo via MONGODB_URL.
  */
 require("dotenv").config();
 const fs = require("fs");
@@ -25,7 +25,6 @@ function splitMarkdown(text) {
     const cleaned = String(text || "").replace(/\r\n/g, "\n").trim();
     if (!cleaned) return [];
 
-    // Prefer splitting on ## headings, then size-limit
     const sections = cleaned.split(/\n(?=##\s)/);
     const chunks = [];
 
@@ -58,8 +57,8 @@ async function main() {
         console.error("Missing MONGODB_URL");
         process.exit(1);
     }
-    if (!process.env.GEMINI_API_KEY) {
-        console.error("Missing GEMINI_API_KEY");
+    if (!process.env.OPENAI_API_KEY) {
+        console.error("Missing OPENAI_API_KEY");
         process.exit(1);
     }
 
@@ -100,8 +99,7 @@ async function main() {
             });
             total += 1;
             console.log(" ok");
-            // gentle rate-limit for free tier
-            await sleep(400);
+            await sleep(200);
         }
     }
 

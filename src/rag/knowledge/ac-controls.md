@@ -10,10 +10,12 @@ AC devices (`deviceType: AC`) let users control a physical air conditioner throu
 - **Lock (`acLocked`)**: When locked, physical remote changes that disagree with the app desired state are reverted by the device. When unlocked, remote changes can update the dashboard (state, setpoint, mode, fan).
 
 ## Where to control
-- Dashboard **AC device card** (quick selects).
-- Venue details **AC Climate** dial (temperature stepper, mode, fan, lock).
+- **Dashboard** (sidebar Home): first pick **Organization** and **Venue** from the **dashboard dropdowns** (not Organization/Venue Management pages).
+- Then use the AC **device card** for quick power, mode, fan, lock, temp.
+- Click the AC card → **right details panel** → **AC Climate** dial and **Schedules / Events**.
+- There is **no** "My Devices" page. Management pages are for CRUD records, not day-to-day AC control/schedules.
 
-Controls are disabled when the device is **offline**.
+## Physical remote vs app
 
 ## Live metrics (optional energy)
 If energy monitoring is included, the card can show current (A), power (W, or kW when ≥ 1000 W), and energy (kWh).

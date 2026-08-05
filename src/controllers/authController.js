@@ -351,23 +351,47 @@ const createSubUser = async (req, res) => {
             isVerified: false
         });
 
-        // Send setup email
+        if (!process.env.JWT_SECRET) {
+            await User.findByIdAndDelete(newUser._id);
+            return res.status(500).json({
+                success: false,
+                message: "Server misconfiguration: JWT_SECRET is missing."
+            });
+        }
+
+        if (!process.env.FRONTEND_URL) {
+            await User.findByIdAndDelete(newUser._id);
+            return res.status(500).json({
+                success: false,
+                message: "Server misconfiguration: FRONTEND_URL is missing."
+            });
+        }
+
         const setupToken = jwt.sign({ email: newUser.email }, process.env.JWT_SECRET, { expiresIn: "24h" });
         newUser.setupToken = setupToken;
         await newUser.save();
 
         const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
 
-        await sendEmail(
-            newUser.email,
-            "Your Account Has Been Created",
-            `
-            <h2>Account Created</h2>
-            <p>Hello ${newUser.name},</p>
-            <p>Your account has been created by ${manager.name}.</p>
-            <a href="${setupLink}">Set Your Password</a>
-            `
-        );
+        try {
+            await sendEmail(
+                newUser.email,
+                "Your Account Has Been Created",
+                `
+                <h2>Account Created</h2>
+                <p>Hello ${newUser.name},</p>
+                <p>Your account has been created by ${manager.name}.</p>
+                <a href="${setupLink}">Set Your Password</a>
+                `
+            );
+        } catch (emailError) {
+            console.error("Sub-user invite email failed:", emailError);
+            await User.findByIdAndDelete(newUser._id);
+            return res.status(500).json({
+                success: false,
+                message: "User could not be created because the invitation email failed to send. Check SMTP settings."
+            });
+        }
 
         res.status(201).json({
             success: true,
@@ -387,6 +411,7 @@ const createSubUser = async (req, res) => {
         if (error.name === "ZodError") {
             return res.status(400).json({
                 success: false,
+                message: error.issues?.[0]?.message || "Invalid request data",
                 errors: error.issues.map(err => ({
                     field: err.path[0],
                     message: err.message
@@ -394,8 +419,18 @@ const createSubUser = async (req, res) => {
             });
         }
 
-        console.error(error);
-        res.status(500).json({ success: false, message: "Server error" });
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                success: false,
+                message: error.message || "Invalid user data"
+            });
+        }
+
+        console.error("Create Sub-User Error:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Server error"
+        });
     }
 };
 

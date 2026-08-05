@@ -34,3 +34,6 @@ This is different from monitoring-only alert flags (which only warn on the dashb
 ## Tips for users
 - “Why is my alert on?” → check the device’s live reading vs its condition thresholds.
 - “Why didn’t my trigger turn on?” → confirm category is trigger, the matching alert access is enabled, manualButton is not blocking, and the device is online.
+
+## What counts as “devices with alerts”
+Only devices with at least one alert flag **true** (same as Dashboard **Alerts** panel). Devices that only show false flags are **not** “having alerts.” Metric values may show as `--` while the alert is still active. The assistant must use the active-alerts list for this question — not a full device dump.

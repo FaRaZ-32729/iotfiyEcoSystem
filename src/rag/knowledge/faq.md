@@ -22,10 +22,32 @@ A: In this app the gas-leakage alert key is stored and sent as `gass`.
 A: Yes. WLD reports detected / not detected from the sensor; there are no `>` / `<` conditions.
 
 **Q: Who can create devices?**  
-A: Managers, and sub-users with **manage** permission on the venue. View-only users cannot create/edit.
+A: Managers, and sub-users with **manage** permission. View-only users cannot create/edit. Admin does not create devices in admin UI.
 
-**Q: Alert vs alert access?**  
+**Q: Can I change a device name?**  
+A: **Manager** and **user (manage)**: yes — Device Management → edit (pencil) → change Device Name → save. **User (view)**: no. **Admin**: no device-rename UI (Devices tab is view-only). Never say only admin can rename devices.
+
+**Q: How do I change my email?**  
+A: Sidebar account/logout → Account Settings → Change Email. Available to manager and sub-users. Hidden for admin.
+
+**Q: How do I change my password?**  
+A: There is no Change Password inside the logged-in Account Settings. Use: Login page → **Forgot password** → enter email → **Send Reset Link** → open email link (15 min) → enter new password (min 8) + confirm → **Reset Password** → login again. Works for admin, manager, and users.
+
+**Q: Alert vs alert access?**
 A: An **alert** is a warning flag on the dashboard. **Alert access** on a trigger device decides whether that alert is allowed to auto-turn the device ON.
 
 **Q: Where do I see all alerts?**  
 A: Open the Alerts panel on the Dashboard — by venue (all device alerts) or by alert type across the organization.
+
+**Q: How do I create / add a device?**  
+A: Open sidebar **Device Management**. The **Add Device** form is there. On that form select Organization, Venue, Device Type, configure conditions, select Category; if Category is trigger, choose alert-access parameters; then Save. Do not go Org Management → Venue Management first — those fields are on the Add Device form.
+
+**Q: Can a manager terminate / Inactive a user?**  
+A: No. A manager can only **delete** their team member from **Users Management**. Only **admin** can set a manager Active/Inactive (suspend) from Management → **Managers** → click status → enter **suspension reason** when deactivating.
+
+**Q: Can I change my own Active/Inactive status?**  
+A: **No.** Nobody can change their own account status in this app. There is no self-service Active/Inactive control. Only an **admin** can change a **manager’s** status (Management → Managers → All Managers → click that manager’s status → suspension reason if deactivating). Managers and sub-users cannot flip Active/Inactive for themselves or for others (managers only delete team members).
+
+**Q: How does admin Inactive a manager?**  
+A: Management → **Managers** → All Managers table → click **Active/Inactive** status on that manager (not yourself as a self-edit screen) → modal → write **suspension reason** → confirm. Deactivating also inactivates that manager’s sub-users. Managers must ask an admin; they cannot do this themselves.
+
