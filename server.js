@@ -42,7 +42,7 @@ app.use(cors({
 // Initialize Socket.io
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:5173", "https://iotfiy-ecosystem.vercel.app"],
+        origin: ["http://localhost:5173", "https://iotfiy-ecosystem.vercel.app", "https://ecosystem.iotfiysolutions.com"],
         methods: ["GET", "POST",],
         credentials: true
     }
