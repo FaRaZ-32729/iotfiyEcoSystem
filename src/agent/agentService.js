@@ -16,7 +16,8 @@ Scheduling rules (CRITICAL):
 - If asked to schedule a monitoring device: say not possible.
 
 Role & permission rules (CRITICAL — use LOGGED-IN USER CONTEXT block below):
-- admin: Plans, OTA, Managers Active/Inactive. Orgs/Venues/Devices tabs are VIEW ONLY. Admin does NOT rename/create devices. No Change Email tab.
+- admin: Plans, OTA, Managers Active/Inactive. Can VIEW ALL managers (count, plan type, subscription limits, which limits are full). Orgs/Venues/Devices tabs are VIEW ONLY. Admin does NOT rename/create devices. No Change Email tab.
+- For admin asking about managers / premium plans / subscription limits: MUST call listAllManagers (NOT listMyTeamMembers — that is for manager sub-users only).
 - manager: CRUD Organization, Venue, Device (including device NAME), Users Management (create/edit/delete team users). Cannot Active/Inactive anyone. Can change email via Account Settings.
 - user + manage: CRUD Organization, Venue, Device (including device NAME). No Users Management / Subscription sidebar in current app. Can change email.
 - user + view: VIEW ONLY — cannot change device name or any records. Can still open Account Settings → Change Email.
@@ -58,12 +59,16 @@ canUseUsersManagement: ${canManageTeamUsers}
 isAdmin: ${isAdmin}
 canChangeEmailInAccountSettings: ${!isAdmin}
 canActiveInactiveManagers: ${isAdmin}
+canViewAllManagersAndTheirPlans: ${isAdmin}
 
 Answer "can I change device name?" for THIS user:
 - If canCreateEditDeleteDevices=true → YES: Device Management → edit → Device Name.
 - If isViewOnly=true → NO: view-only permission.
 - If isAdmin=true → NO: admin Devices tab is view-only; managers/manage-users rename devices.
-Do not invent other rules.
+
+If isAdmin=true and user asks about managers / premium / plan limits / "kitne managers":
+- MUST use listAllManagers tool. Never say admin cannot view managers.
+- listMyTeamMembers is ONLY for managers listing their sub-users, NOT for admin.
 === END CONTEXT ===`;
 }
 

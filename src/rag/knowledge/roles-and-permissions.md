@@ -19,7 +19,7 @@ Answer “can I …?” using the **logged-in user’s role + permission**, neve
 
 Admin sidebar / Management area:
 
-1. **Managers** — view managers (plan, orgs, venues, devices, users, status). Can **Active/Inactive** a manager (click status → modal → **suspension reason** required when deactivating). Nobody changes their **own** status.
+1. **Managers** — view all managers (plan, orgs, venues, devices, users, status). Eco assistant (admin): use listAllManagers for counts, premium plan users, and limit-full status (e.g. organization limit reached). Can **Active/Inactive** a manager (click status → modal → **suspension reason** required when deactivating). Nobody changes their **own** status.
 2. **Organizations** — **view only** (no create/edit/delete UI).
 3. **Venues** — **view only** (there is no “Revenue” tab; venues is the places tab).
 4. **Devices** — **view only** (admin does **not** rename or create devices here).

@@ -473,25 +473,192 @@ async function getDeviceSnapshot(user, args = {}) {
     return { device: slimDevice(device) };
 }
 
+async function computeManagerUsageStats(managerId, plan) {
+    if (!plan) {
+        return {
+            error: "No subscription plan on this manager account",
+        };
+    }
+
+    const usedOrganizations = await Organization.countDocuments({ owner: managerId });
+    const orgIds = (
+        await Organization.find({ owner: managerId }).select("_id").lean()
+    ).map((o) => o._id);
+    const usedVenues = await Venue.countDocuments({
+        organization: { $in: orgIds },
+    });
+    const venueIds = (
+        await Venue.find({ organization: { $in: orgIds } }).select("_id").lean()
+    ).map((v) => v._id);
+    const usedDevices = await Device.countDocuments({ venue: { $in: venueIds } });
+    const usedUsers = await User.countDocuments({
+        creatorId: managerId,
+        role: "user",
+    });
+
+    const maxUsers = plan.maxUsers || 10;
+    const usage = {
+        organizations: {
+            used: usedOrganizations,
+            total: plan.maxOrganizations,
+            remaining: Math.max(0, plan.maxOrganizations - usedOrganizations),
+            atLimit: usedOrganizations >= plan.maxOrganizations,
+        },
+        venues: {
+            used: usedVenues,
+            total: plan.maxVenues,
+            remaining: Math.max(0, plan.maxVenues - usedVenues),
+            atLimit: usedVenues >= plan.maxVenues,
+        },
+        devices: {
+            used: usedDevices,
+            total: plan.maxDevices,
+            remaining: Math.max(0, plan.maxDevices - usedDevices),
+            atLimit: usedDevices >= plan.maxDevices,
+        },
+        users: {
+            used: usedUsers,
+            total: maxUsers,
+            remaining: Math.max(0, maxUsers - usedUsers),
+            atLimit: usedUsers >= maxUsers,
+        },
+    };
+
+    const limitsReached = [];
+    if (usage.organizations.atLimit) limitsReached.push("organizations");
+    if (usage.venues.atLimit) limitsReached.push("venues");
+    if (usage.devices.atLimit) limitsReached.push("devices");
+    if (usage.users.atLimit) limitsReached.push("users");
+
+    return { usage, limitsReached };
+}
+
+/**
+ * Admin only: all managers with plan + usage/limits (same view as Admin → Managers).
+ */
+async function listAllManagers(user, args = {}) {
+    if (user.role !== "admin") {
+        return {
+            error: "Only admins can list all managers. Managers should use listMyTeamMembers for their sub-users.",
+            count: 0,
+            managers: [],
+        };
+    }
+
+    const planType = args.planType
+        ? String(args.planType).toLowerCase().trim()
+        : null;
+    const atLimit = args.atLimit
+        ? String(args.atLimit).toLowerCase().trim()
+        : null;
+    const managerEmail = args.managerEmail
+        ? String(args.managerEmail).toLowerCase().trim()
+        : null;
+    const managerName = args.managerName
+        ? String(args.managerName).trim()
+        : null;
+    const isActive =
+        args.isActive === true || args.isActive === "true"
+            ? true
+            : args.isActive === false || args.isActive === "false"
+              ? false
+              : null;
+
+    const filter = { role: "manager" };
+    if (managerEmail) filter.email = managerEmail;
+    if (managerName) filter.name = new RegExp(escapeRegex(managerName), "i");
+    if (isActive !== null) filter.isActive = isActive;
+
+    const managers = await User.find(filter)
+        .select("name email isActive currentSubscription createdAt")
+        .populate({
+            path: "currentSubscription",
+            populate: {
+                path: "plan",
+                select:
+                    "name type price durationDays maxOrganizations maxVenues maxDevices maxUsers",
+            },
+        })
+        .sort({ createdAt: -1 })
+        .lean();
+
+    const rows = [];
+    for (const manager of managers) {
+        const sub = manager.currentSubscription;
+        const plan = sub?.plan || null;
+
+        if (planType && (!plan || String(plan.type).toLowerCase() !== planType)) {
+            continue;
+        }
+
+        const usageResult = plan
+            ? await computeManagerUsageStats(manager._id, plan)
+            : { usage: null, limitsReached: [], error: "No active plan" };
+
+        if (atLimit) {
+            const key = atLimit === "organization" ? "organizations" : atLimit;
+            if (!usageResult.limitsReached?.includes(key)) continue;
+        }
+
+        rows.push({
+            id: String(manager._id),
+            name: manager.name,
+            email: manager.email,
+            isActive: manager.isActive !== false,
+            subscription: plan
+                ? {
+                      planName: plan.name,
+                      planType: plan.type,
+                      status: sub?.status || null,
+                      isActive: sub?.status === "active",
+                  }
+                : null,
+            usage: usageResult.usage || null,
+            limitsReached: usageResult.limitsReached || [],
+            teamUsersCount: usageResult.usage?.users?.used ?? null,
+        });
+    }
+
+    const activeCount = rows.filter((m) => m.isActive).length;
+
+    return {
+        count: rows.length,
+        totalManagersInSystem: rows.length,
+        activeManagers: activeCount,
+        inactiveManagers: rows.length - activeCount,
+        managers: rows,
+        instructionForAssistant:
+            "Admin CAN view all managers, their plans (free/basic/premium/custom), and which limits are full (organizations/venues/devices/users). Never say admin cannot see managers.",
+        filtersApplied: {
+            planType: planType || null,
+            atLimit: atLimit || null,
+            managerEmail: managerEmail || null,
+            managerName: managerName || null,
+            isActive,
+        },
+    };
+}
+
 async function listMyTeamMembers(user) {
     if (user.role === "user") {
         return {
-            error: "Only managers (and admins) can list team members",
+            error: "Only managers can list their team members (sub-users).",
             count: 0,
             members: [],
         };
     }
 
-    const managerId = user.role === "manager" ? user._id : null;
-    // Admin without managerId: return message to use a manager context — for admin list nothing specific
     if (user.role === "admin") {
         return {
-            message:
-                "Admin: specify you need a particular manager's team via the logged-in manager account. This session is admin.",
+            error:
+                "Admin does not have 'team members' under their own account. Use listAllManagers to see every manager and their subscription/limits.",
             count: 0,
             members: [],
+            hint: "Call listAllManagers for manager count, premium plans, and limit status.",
         };
     }
+
+    const managerId = user._id;
 
     const subUsers = await User.find({
         creatorId: managerId,
@@ -517,9 +684,18 @@ async function listMyTeamMembers(user) {
 }
 
 async function countMyTeamMembers(user) {
+    if (user.role === "admin") {
+        const count = await User.countDocuments({ role: "manager" });
+        return {
+            count,
+            role: "admin",
+            note: "This is the total number of managers on the platform. Use listAllManagers for plan and limit details.",
+        };
+    }
+
     if (user.role !== "manager") {
         return {
-            error: "Only managers can count their team members",
+            error: "Only managers can count their team members (sub-users).",
             count: 0,
         };
     }
@@ -548,6 +724,13 @@ async function searchHelpDocs(_user, args = {}) {
  * Manager (or admin with subscription): used / total / remaining for orgs, venues, devices, users.
  */
 async function getMySubscriptionUsage(user) {
+    if (user.role === "admin") {
+        return {
+            error:
+                "Admin account has no personal subscription usage. Use listAllManagers to see each manager's plan and limits.",
+        };
+    }
+
     let target = user;
 
     // Sub-user: usage belongs to their manager
@@ -689,6 +872,7 @@ const TOOL_IMPL = {
     getDeviceSnapshot: (user, args) => getDeviceSnapshot(user, args),
     listMyTeamMembers: (user, args) => listMyTeamMembers(user, args),
     countMyTeamMembers: (user, args) => countMyTeamMembers(user, args),
+    listAllManagers: (user, args) => listAllManagers(user, args),
     getMySubscriptionUsage: (user, args) => getMySubscriptionUsage(user, args),
     listSubscriptionPlans: (user, args) => listSubscriptionPlans(user, args),
     searchHelpDocs: (user, args) => searchHelpDocs(user, args),
@@ -784,9 +968,37 @@ const AGENT_TOOLS = [
     {
         type: "function",
         function: {
+            name: "listAllManagers",
+            description:
+                "ADMIN ONLY. List all managers on the platform with subscription plan (free/basic/premium/custom), active/inactive status, usage vs limits (orgs/venues/devices/team users), and which limits are full. Use for: 'kitne managers hain?', 'premium plan wale managers', 'kis manager ki org limit full hai?'. Optional filters: planType, atLimit (organizations|venues|devices|users), managerEmail, managerName, isActive.",
+            parameters: {
+                type: "object",
+                properties: {
+                    planType: {
+                        type: "string",
+                        description: "free | basic | premium | custom",
+                    },
+                    atLimit: {
+                        type: "string",
+                        description:
+                            "Filter managers who hit limit: organizations | venues | devices | users",
+                    },
+                    managerEmail: { type: "string" },
+                    managerName: { type: "string" },
+                    isActive: {
+                        type: "boolean",
+                        description: "true = active managers only, false = inactive only",
+                    },
+                },
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
             name: "listMyTeamMembers",
             description:
-                "For managers: list sub-users (name, email, permission, venues). Not for role=user.",
+                "For MANAGERS only: list their sub-users (name, email, permission, venues). Admins must use listAllManagers instead.",
             parameters: { type: "object", properties: {} },
         },
     },
@@ -794,7 +1006,8 @@ const AGENT_TOOLS = [
         type: "function",
         function: {
             name: "countMyTeamMembers",
-            description: "For managers: how many sub-users are under them.",
+            description:
+                "For managers: count sub-users under them. For admin: total manager count on platform (use listAllManagers for details).",
             parameters: { type: "object", properties: {} },
         },
     },
@@ -853,6 +1066,7 @@ module.exports = {
     getDeviceSnapshot,
     listMyTeamMembers,
     countMyTeamMembers,
+    listAllManagers,
     getMySubscriptionUsage,
     listSubscriptionPlans,
     searchHelpDocs,

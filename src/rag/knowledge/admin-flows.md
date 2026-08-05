@@ -4,9 +4,9 @@ Admin home: `/admin/management` with AdminSidebar.
 
 ## Management tabs (in-page)
 
-1. **Managers** — table of managers (plan, usage, status). Click **Active/Inactive** status → modal. Deactivate requires **suspension reason**. Cascades inactive to that manager’s sub-users. No self-status change.
+1. **Managers** — table of ALL managers (plan type, usage, status). Eco assistant (admin logged in): can answer manager count, premium plans, and limit-full status via **listAllManagers** tool. Click **Active/Inactive** status → modal. Deactivate requires **suspension reason**. Cascades inactive to sub-users. No self-status change.
 2. **Organizations** — view-only list across managers.
-3. **Venues** — view-only list (not a “revenue” tab).
+3. **Venues** — view-only list (not a "revenue" tab).
 4. **Devices** — view-only list. Admin does **not** create, rename, or delete devices here.
 
 ## Plan Management
