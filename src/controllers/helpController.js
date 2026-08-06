@@ -1,6 +1,11 @@
 const { chat } = require("../rag/ragService");
 const { agentChat, agentChatStream } = require("../agent/agentService");
 const { transcribeAudioBuffer } = require("../rag/transcribeService");
+const {
+    createRealtimeSession,
+    executeRealtimeTool,
+    formatVoiceAnswerForChat,
+} = require("../agent/realtimeService");
 
 const FRIENDLY_UNAVAILABLE =
     "Currently the service is unavailable. Sorry for the inconvenience — please try again.";
@@ -113,4 +118,82 @@ async function helpTranscribe(req, res) {
     }
 }
 
-module.exports = { helpChat, helpChatStream, helpTranscribe };
+/**
+ * POST /api/help/realtime/session
+ * Returns ephemeral client secret for browser WebRTC (Live Voice).
+ * Does not replace existing /chat or /transcribe flows.
+ */
+async function helpRealtimeSession(req, res) {
+    try {
+        const session = await createRealtimeSession(req.user);
+        return res.status(200).json({
+            success: true,
+            clientSecret: session.clientSecret,
+            expiresAt: session.expiresAt,
+            model: session.model,
+            voice: session.voice,
+        });
+    } catch (err) {
+        console.error("[help/realtime/session]", err.message || err);
+        return res.status(err.statusCode || 500).json({
+            success: false,
+            message: FRIENDLY_UNAVAILABLE,
+        });
+    }
+}
+
+/**
+ * POST /api/help/realtime/tool
+ * Body: { name, arguments? } — runs existing agent tools for Live Voice.
+ */
+async function helpRealtimeTool(req, res) {
+    try {
+        const name = req.body?.name;
+        const args = req.body?.arguments ?? req.body?.args ?? {};
+        const result = await executeRealtimeTool(req.user, name, args);
+        return res.status(200).json({ success: true, result });
+    } catch (err) {
+        console.error("[help/realtime/tool]", err.message || err);
+        return res.status(err.statusCode || 500).json({
+            success: false,
+            message: FRIENDLY_UNAVAILABLE,
+            result: { error: err.message || "Tool failed" },
+        });
+    }
+}
+
+/**
+ * POST /api/help/realtime/format-chat
+ * Body: { spokenText, userText? } — chat-friendly Markdown from spoken answer.
+ */
+async function helpRealtimeFormatChat(req, res) {
+    try {
+        const spokenText = String(req.body?.spokenText || "").trim();
+        if (!spokenText) {
+            return res.status(400).json({
+                success: false,
+                message: "spokenText is required",
+            });
+        }
+        const text = await formatVoiceAnswerForChat({
+            spokenText,
+            userText: req.body?.userText,
+        });
+        return res.status(200).json({ success: true, text });
+    } catch (err) {
+        console.error("[help/realtime/format-chat]", err.message || err);
+        return res.status(err.statusCode || 500).json({
+            success: false,
+            message: FRIENDLY_UNAVAILABLE,
+        });
+    }
+}
+
+module.exports = {
+    helpChat,
+    helpChatStream,
+    helpTranscribe,
+    helpRealtimeSession,
+    helpRealtimeTool,
+    helpRealtimeFormatChat,
+};

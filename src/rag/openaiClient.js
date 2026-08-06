@@ -25,9 +25,14 @@ function getTranscribeModelName() {
     return process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 }
 
+function getRealtimeModelName() {
+    return process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
+}
+
 module.exports = {
     getOpenAIClient,
     getChatModelName,
     getEmbedModelName,
     getTranscribeModelName,
+    getRealtimeModelName,
 };

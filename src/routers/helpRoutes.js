@@ -5,6 +5,9 @@ const {
     helpChat,
     helpChatStream,
     helpTranscribe,
+    helpRealtimeSession,
+    helpRealtimeTool,
+    helpRealtimeFormatChat,
 } = require("../controllers/helpController");
 
 const router = express.Router();
@@ -23,5 +26,10 @@ router.post(
     uploadAudio.single("audio"),
     helpTranscribe
 );
+
+// Live speech-to-speech (WebRTC Realtime) — separate from text chat / STT mic
+router.post("/realtime/session", authenticate, helpRealtimeSession);
+router.post("/realtime/tool", authenticate, helpRealtimeTool);
+router.post("/realtime/format-chat", authenticate, helpRealtimeFormatChat);
 
 module.exports = router;

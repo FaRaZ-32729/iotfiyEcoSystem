@@ -223,4 +223,6 @@ async function agentChat({ user, message, history = [] }) {
 module.exports = {
     agentChatStream,
     agentChat,
+    SYSTEM_INSTRUCTION,
+    buildLoggedInUserContext,
 };
