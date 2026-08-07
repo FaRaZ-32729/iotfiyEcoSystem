@@ -554,26 +554,34 @@ async function getDeviceSensorHistory(user, args = {}) {
         start = new Date(end.getTime() - 24 * 3600 * 1000);
     }
 
+    // Single calendar day: if only start given as date-like, expand to full day
+    // (already handled when model passes start+end of day)
+
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
         return { error: "Invalid start/end date" };
     }
     if (end < start) return { error: "end must be after start" };
 
-    const mode = String(args.mode || "summary").toLowerCase();
-    const wantRows = mode === "samples" || mode === "both";
+    // Default: return rows like Download Modal. Use summary-only only when asked for averages.
+    const mode = String(args.mode || "both").toLowerCase();
+    const wantRows = mode !== "summary";
     const maxRows = wantRows
-        ? Math.min(Math.max(parseInt(args.maxRows, 10) || 36, 1), 72)
+        ? Math.min(Math.max(parseInt(args.maxRows, 10) || 500, 1), 500)
         : null;
 
     let intervalValue =
-        args.intervalValue != null ? args.intervalValue : undefined;
+        args.intervalValue != null && String(args.intervalValue).trim() !== ""
+            ? args.intervalValue
+            : undefined;
     let intervalUnit = args.intervalUnit
         ? String(args.intervalUnit).toLowerCase()
         : undefined;
 
-    // Auto-bucket long ranges so we do not pull every raw minute into memory
+    // Only auto-bucket for SUMMARY on LONG ranges (never for listing rows / no-interval asks).
+    // Do NOT auto-interval a single day — that diverges from Download Modal raw rows.
     let autoInterval = false;
     if (
+        mode === "summary" &&
         (intervalValue == null || String(intervalValue).trim() === "") &&
         !intervalUnit
     ) {
@@ -586,12 +594,22 @@ async function getDeviceSensorHistory(user, args = {}) {
             intervalValue = 1;
             intervalUnit = "h";
             autoInterval = true;
-        } else if (spanMs > 6 * 3600000) {
-            intervalValue = 15;
-            intervalUnit = "m";
-            autoInterval = true;
         }
     }
+
+    console.log("[agent:getDeviceSensorHistory] request", {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        mode,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        intervalValue: intervalValue ?? null,
+        intervalUnit: intervalUnit ?? null,
+        autoInterval,
+        wantRows,
+        maxRows,
+        args,
+    });
 
     const result = await fetchSensorHistory({
         deviceId: device.deviceId,
@@ -600,7 +618,23 @@ async function getDeviceSensorHistory(user, args = {}) {
         intervalValue,
         intervalUnit,
         includeSummary: true,
+        // Listing readings: do not subsample unless over maxRows
         maxRows: wantRows ? maxRows : null,
+    });
+
+    console.log("[agent:getDeviceSensorHistory] result", {
+        ok: result.ok,
+        deviceId: result.deviceId || device.deviceId,
+        count: result.count,
+        returnedRowCount: result.returnedRowCount,
+        truncated: result.truncated,
+        interval: result.interval,
+        historicalStorageAvailable: result.historicalStorageAvailable,
+        message: result.message,
+        firstRow: result.rows?.[0],
+        lastRow: result.rows?.length
+            ? result.rows[result.rows.length - 1]
+            : undefined,
     });
 
     if (!result.ok && result.historicalStorageAvailable === false) {
@@ -626,7 +660,7 @@ async function getDeviceSensorHistory(user, args = {}) {
         deviceType: result.deviceType,
         range: { start: result.start, end: result.end },
         interval: result.interval,
-        autoIntervalApplied: autoInterval || undefined,
+        autoIntervalApplied: autoInterval || false,
         fields: result.fields,
         pointCount: result.count,
         summary: result.summary,
@@ -637,17 +671,18 @@ async function getDeviceSensorHistory(user, args = {}) {
         return {
             ...base,
             instructionForAssistant:
-                "Use summary averages/min/max (server-computed). If pointCount is 0, say no stored samples in that range. Never invent readings.",
+                "Use summary averages/min/max (server-computed). pointCount is number of points used. If 0, say no data. Never invent readings.",
         };
     }
 
     return {
         ...base,
+        rows: result.rows,
         sampleRows: result.rows,
         truncated: result.truncated,
         returnedRowCount: result.returnedRowCount,
         instructionForAssistant:
-            "Summarize with summary stats; use sampleRows only if the user wants point-by-point values. Never invent readings.",
+            `You MUST report ALL ${result.returnedRowCount ?? result.rows?.length ?? 0} returned rows (or clearly say count=${result.count}). Do not say there are only 2 if returnedRowCount is higher. No interval was applied unless interval/autoIntervalApplied is set. Never invent or drop readings.`,
     };
 }
 
@@ -1198,7 +1233,7 @@ const AGENT_TOOLS = [
         function: {
             name: "getDeviceSensorHistory",
             description:
-                "READ-ONLY historical sensor data from the same Mongo clusters as Dashboard Download Modal. Use for: last week/day readings, date-range history, averages/min/max, or interval buckets (e.g. every 4 hours). Prefer deviceId. For averages use mode=summary (server computes avg/min/max — do not invent). For point lists use mode=samples or both with intervalValue+intervalUnit (m|h|d). If cluster URL missing, tool reports historicalStorageAvailable=false — then call getDeviceSnapshot for latest live only.",
+                "READ-ONLY historical sensor data — SAME query as Dashboard Download Modal. For a single day with NO interval: pass start+end for that day, omit intervalValue/intervalUnit, use mode=both (default). That returns every raw row (pointCount/returnedRowCount must match Download Modal). For averages only use mode=summary. For buckets e.g. every 4 hours pass intervalValue=4 and intervalUnit=h. Prefer deviceId. If historicalStorageAvailable=false, use getDeviceSnapshot for live only.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1206,11 +1241,13 @@ const AGENT_TOOLS = [
                     deviceName: { type: "string" },
                     start: {
                         type: "string",
-                        description: "ISO start datetime (optional if lastDays/lastHours set)",
+                        description:
+                            "ISO start (for Aug 6 2026 single day use 2026-08-06T00:00:00.000Z or local day start)",
                     },
                     end: {
                         type: "string",
-                        description: "ISO end datetime",
+                        description:
+                            "ISO end (for that single day use end of day). Required with start.",
                     },
                     lastDays: {
                         type: "number",
@@ -1222,19 +1259,21 @@ const AGENT_TOOLS = [
                     },
                     intervalValue: {
                         type: "number",
-                        description: "Bucket size, e.g. 4 with intervalUnit=h",
+                        description:
+                            "ONLY if user asks for an interval/bucket. Omit entirely when user wants all raw readings.",
                     },
                     intervalUnit: {
                         type: "string",
-                        description: "m | h | d",
+                        description: "m | h | d — only with intervalValue",
                     },
                     mode: {
                         type: "string",
-                        description: "summary (default) | samples | both",
+                        description:
+                            "both (default, returns all rows + summary) | samples | summary (averages only)",
                     },
                     maxRows: {
                         type: "number",
-                        description: "Max sample rows when mode includes samples (default 36, max 72)",
+                        description: "Cap rows (default 500). Raise only if needed.",
                     },
                 },
             },
