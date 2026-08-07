@@ -171,14 +171,91 @@ function slimDevice(d) {
     };
 }
 
+const DAY_ORDER = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+];
+const PK_OFFSET_MINUTES = 5 * 60; // Asia/Karachi (PKT, no DST)
+
+function parseHHmmToMinutes(hhmm) {
+    const [h, m] = String(hhmm || "00:00").split(":").map(Number);
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+function minutesToHHmm(totalMinutes) {
+    const mins = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Convert stored UTC HH:mm → Pakistan clock (+5). dayShift 0 or +1 (or rarely more). */
+function utcHHmmToPakistan(hhmmUtc) {
+    if (!hhmmUtc) return null;
+    const pkTotal = parseHHmmToMinutes(hhmmUtc) + PK_OFFSET_MINUTES;
+    const dayShift = Math.floor(pkTotal / (24 * 60));
+    return {
+        time: minutesToHHmm(pkTotal),
+        dayShift,
+    };
+}
+
+function shiftWeekdays(days, dayShift) {
+    if (!dayShift || !Array.isArray(days) || !days.length) {
+        return (days || []).map((d) => String(d).toLowerCase());
+    }
+    return days.map((d) => {
+        const idx = DAY_ORDER.indexOf(String(d).toLowerCase().trim());
+        if (idx < 0) return String(d).toLowerCase();
+        return DAY_ORDER[(idx + dayShift + 70) % 7];
+    });
+}
+
+function formatClockLabel(hhmm, zone) {
+    if (!hhmm) return null;
+    const [h, m] = String(hhmm).split(":").map(Number);
+    const hour = Number.isFinite(h) ? h : 0;
+    const min = Number.isFinite(m) ? m : 0;
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const h12 = hour % 12 || 12;
+    return `${h12}:${String(min).padStart(2, "0")} ${ampm} ${zone}`;
+}
+
 function slimScheduleEvent(ev) {
     if (!ev) return null;
+    const startPk = utcHHmmToPakistan(ev.startTime);
+    const endPk = ev.endTime ? utcHHmmToPakistan(ev.endTime) : null;
+    const daysUtc = (ev.days || []).map((d) => String(d).toLowerCase());
+    const daysPakistan = shiftWeekdays(daysUtc, startPk?.dayShift || 0);
+    const dayChangesInPakistan = (startPk?.dayShift || 0) !== 0;
+
     return {
         eventId: String(ev._id),
         deviceId: ev.deviceId,
         startTimeUtc: ev.startTime,
         endTimeUtc: ev.endTime || null,
-        days: ev.days || [],
+        startTimePakistan: startPk?.time || null,
+        endTimePakistan: endPk?.time || null,
+        startLabelUtc: formatClockLabel(ev.startTime, "UTC"),
+        endLabelUtc: ev.endTime ? formatClockLabel(ev.endTime, "UTC") : null,
+        startLabelPakistan: startPk
+            ? formatClockLabel(startPk.time, "Pakistan (PKT)")
+            : null,
+        endLabelPakistan: endPk
+            ? formatClockLabel(endPk.time, "Pakistan (PKT)")
+            : null,
+        daysUtc,
+        daysPakistan,
+        days: daysUtc,
+        dayChangesInPakistan,
+        timezoneNote: dayChangesInPakistan
+            ? "UTC→Pakistan (+5h) crosses midnight — weekday in Pakistan can be the NEXT day vs UTC days."
+            : "Pakistan is UTC+5; same calendar day for this start time.",
         command: ev.command || null,
         setTemperature: ev.setTemperature ?? null,
         status: ev.status,
@@ -186,6 +263,28 @@ function slimScheduleEvent(ev) {
         isOvernight: !!ev.isOvernight,
         intervalSeconds: ev.intervalSeconds ?? null,
         createdAt: ev.createdAt || null,
+    };
+}
+
+function clockContextForAssistant() {
+    const now = new Date();
+    const fmt = (timeZone) =>
+        now.toLocaleString("en-US", {
+            timeZone,
+            weekday: "long",
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        });
+    return {
+        nowUtc: fmt("UTC"),
+        nowPakistan: fmt("Asia/Karachi"),
+        pakistanOffset: "UTC+5 (PKT)",
+        howToSpeakTimes:
+            "ALWAYS say times as: (1) UTC first, then (2) Pakistan local. Weekday may differ after +5h (e.g. Thu 19:07 UTC = Fri 12:07 AM Pakistan).",
     };
 }
 
@@ -223,7 +322,7 @@ function getNextTriggerFromList(events = []) {
         type: "NEXT",
         event: slimScheduleEvent(next),
         isTrigger: true,
-        note: "Trigger events fire at startTime (UTC); they do not have an end window.",
+        note: "Trigger events fire at startTime. Report UTC then Pakistan (PKT). Weekday may change after +5h.",
     };
 }
 
@@ -708,9 +807,11 @@ async function getDeviceEvents(user, args = {}) {
             eventKind: "trigger",
             count: events.length,
             events: events.map(slimScheduleEvent),
+            clock: clockContextForAssistant(),
             timesAreUtc: true,
+            alsoPakistanPkt: true,
             instructionForAssistant:
-                "These are trigger schedules (fire at startTime UTC). They have no endTime or setTemperature. Answer from this list — do not say you don't know.",
+                "Trigger schedules (startTime only). Say UTC first, then Pakistan (PKT +5) from startTimePakistan/daysPakistan. If dayChangesInPakistan, mention weekday can differ.",
         };
     }
 
@@ -726,9 +827,11 @@ async function getDeviceEvents(user, args = {}) {
         eventKind: "schedule",
         count: events.length,
         events: events.map(slimScheduleEvent),
+        clock: clockContextForAssistant(),
         timesAreUtc: true,
+        alsoPakistanPkt: true,
         instructionForAssistant:
-            "These are scheduling/AC events. For AC ON events, setTemperature is the setpoint (°C). Times are UTC. Answer from this list.",
+            "Scheduling/AC events. For AC ON, include setTemperature. ALWAYS say UTC time/days first, then Pakistan local from *Pakistan fields. Day may change after +5h.",
     };
 }
 
@@ -768,9 +871,11 @@ async function getCurrentOrNextEvent(user, args = {}) {
             eventKind: "trigger",
             ...lookup,
             allActiveCount: events.length,
+            clock: clockContextForAssistant(),
             timesAreUtc: true,
+            alsoPakistanPkt: true,
             instructionForAssistant:
-                "Report the NEXT trigger fire time from this result. Triggers have no running end window.",
+                "NEXT trigger fire. Say UTC first, then Pakistan local from event fields. Day may differ after +5h.",
         };
     }
 
@@ -783,9 +888,11 @@ async function getCurrentOrNextEvent(user, args = {}) {
         category: device.category,
         eventKind: "schedule",
         ...formatted,
+        clock: clockContextForAssistant(),
         timesAreUtc: true,
+        alsoPakistanPkt: true,
         instructionForAssistant:
-            "type=CURRENT means the event window is running now; type=NEXT is upcoming. For AC, include setTemperature when present. Times are UTC.",
+            "type=CURRENT running now; type=NEXT upcoming. Say UTC first, then Pakistan (startTimePakistan/daysPakistan). If dayChangesInPakistan, mention weekday change. Include setTemperature for AC.",
     };
 }
 
@@ -906,9 +1013,11 @@ async function listDevicesWithEvents(user, args = {}) {
         count: rows.length,
         currentlyRunningOnly: onlyCurrentlyRunning,
         devices: rows,
+        clock: clockContextForAssistant(),
         timesAreUtc: true,
+        alsoPakistanPkt: true,
         instructionForAssistant:
-            "Use this for 'which devices have events/schedules?' and 'kisi device par currently event lagi hai?'. For AC setpoints use event.setTemperature. Times are UTC. Prefer isOnline/connectivity over dbStatus.",
+            "Devices with ACTIVE events. Say UTC times first, then Pakistan local from event *Pakistan fields (day may change +5h). Prefer isOnline over dbStatus. AC setTemperature from events.",
     };
 }
 
