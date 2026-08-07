@@ -128,10 +128,12 @@ async function helpRealtimeSession(req, res) {
         const session = await createRealtimeSession(req.user);
         return res.status(200).json({
             success: true,
+            provider: session.provider || "openai",
             clientSecret: session.clientSecret,
             expiresAt: session.expiresAt,
             model: session.model,
             voice: session.voice,
+            liveConfig: session.liveConfig || null,
         });
     } catch (err) {
         console.error("[help/realtime/session]", err.message || err);

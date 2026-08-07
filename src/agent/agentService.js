@@ -2,7 +2,17 @@ const {
     getOpenAIClient,
     getChatModelName,
 } = require("../rag/openaiClient");
+const {
+    getGeminiClient,
+    getGeminiChatModelName,
+    useGeminiForText,
+} = require("../rag/geminiClient");
 const { runAgentTool, AGENT_TOOLS } = require("./agentTools");
+const {
+    toGeminiFunctionDeclarations,
+    toGeminiHistory,
+    extractFunctionCalls,
+} = require("./geminiAgentUtils");
 
 const SYSTEM_INSTRUCTION = `You are Eco, the ecoSystem personal assistant for the logged-in user.
 
@@ -115,8 +125,159 @@ function parseToolArgs(raw) {
     }
 }
 
+async function* agentChatStreamGemini({ user, message, history = [] }) {
+    const ai = getGeminiClient();
+    const model = getGeminiChatModelName();
+    const systemInstruction = `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`;
+    const functionDeclarations = toGeminiFunctionDeclarations(AGENT_TOOLS);
+
+    const contents = [
+        ...toGeminiHistory(history),
+        { role: "user", parts: [{ text: String(message).trim() }] },
+    ];
+
+    const maxRounds = 6;
+    let finalText = "";
+
+    for (let round = 0; round < maxRounds; round++) {
+        const response = await ai.models.generateContent({
+            model,
+            contents,
+            config: {
+                systemInstruction,
+                temperature: 0.2,
+                tools: [{ functionDeclarations }],
+                automaticFunctionCalling: { disable: true },
+            },
+        });
+
+        const calls = extractFunctionCalls(response);
+        if (calls?.length) {
+            const modelContent = response.candidates?.[0]?.content;
+            if (modelContent?.parts?.length) {
+                contents.push(modelContent);
+            } else {
+                contents.push({
+                    role: "model",
+                    parts: calls.map((fc) => ({
+                        functionCall: {
+                            name: fc.name,
+                            args: fc.args || {},
+                            id: fc.id,
+                        },
+                    })),
+                });
+            }
+
+            const responseParts = [];
+            for (const fc of calls) {
+                const name = fc.name;
+                const args = parseToolArgs(fc.args);
+                console.log(
+                    `[agent:gemini] tool=${name} user=${user.email || user._id} role=${user.role} args=${JSON.stringify(args)}`
+                );
+                const toolResult = await runAgentTool(user, name, args);
+                const part = {
+                    functionResponse: {
+                        name,
+                        response:
+                            toolResult && typeof toolResult === "object"
+                                ? toolResult
+                                : { result: toolResult },
+                    },
+                };
+                if (fc.id) part.functionResponse.id = fc.id;
+                responseParts.push(part);
+            }
+            contents.push({ role: "user", parts: responseParts });
+            continue;
+        }
+
+        finalText = String(response.text || "").trim();
+        break;
+    }
+
+    if (!finalText) {
+        finalText =
+            "I looked that up but could not form an answer. Please try rephrasing, or tell me the device ID.";
+    }
+
+    for await (const ev of softStreamText(finalText)) {
+        yield ev;
+    }
+    yield { type: "done" };
+}
+
+async function* agentChatStreamOpenAI({ user, message, history = [] }) {
+    const openai = getOpenAIClient();
+    const model = getChatModelName();
+
+    const messages = [
+        {
+            role: "system",
+            content: `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`,
+        },
+        ...toOpenAIHistory(history),
+        { role: "user", content: String(message).trim() },
+    ];
+
+    const maxRounds = 6;
+    let finalText = "";
+
+    for (let round = 0; round < maxRounds; round++) {
+        const completion = await openai.chat.completions.create({
+            model,
+            messages,
+            tools: AGENT_TOOLS,
+            tool_choice: "auto",
+            temperature: 0.2,
+        });
+
+        const choice = completion.choices?.[0];
+        const msg = choice?.message;
+        if (!msg) break;
+
+        const toolCalls = msg.tool_calls;
+        if (toolCalls?.length) {
+            messages.push({
+                role: "assistant",
+                content: msg.content || null,
+                tool_calls: toolCalls,
+            });
+
+            for (const call of toolCalls) {
+                const name = call.function?.name;
+                const args = parseToolArgs(call.function?.arguments);
+                console.log(
+                    `[agent] tool=${name} user=${user.email || user._id} role=${user.role} args=${JSON.stringify(args)}`
+                );
+                const toolResult = await runAgentTool(user, name, args);
+                messages.push({
+                    role: "tool",
+                    tool_call_id: call.id,
+                    content: JSON.stringify(toolResult),
+                });
+            }
+            continue;
+        }
+
+        finalText = String(msg.content || "").trim();
+        break;
+    }
+
+    if (!finalText) {
+        finalText =
+            "I looked that up but could not form an answer. Please try rephrasing, or tell me the device ID.";
+    }
+
+    for await (const ev of softStreamText(finalText)) {
+        yield ev;
+    }
+    yield { type: "done" };
+}
+
 /**
- * Personal data agent with OpenAI function calling.
+ * Personal data agent with function calling (Gemini text by default when configured).
  * Yields: { type:'token', text } | { type:'done' } | { type:'error', message }
  */
 async function* agentChatStream({ user, message, history = [] }) {
@@ -131,71 +292,11 @@ async function* agentChatStream({ user, message, history = [] }) {
     }
 
     try {
-        const openai = getOpenAIClient();
-        const model = getChatModelName();
-
-        const messages = [
-            {
-                role: "system",
-                content: `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`,
-            },
-            ...toOpenAIHistory(history),
-            { role: "user", content: q },
-        ];
-
-        const maxRounds = 6;
-        let finalText = "";
-
-        for (let round = 0; round < maxRounds; round++) {
-            const completion = await openai.chat.completions.create({
-                model,
-                messages,
-                tools: AGENT_TOOLS,
-                tool_choice: "auto",
-                temperature: 0.2,
-            });
-
-            const choice = completion.choices?.[0];
-            const msg = choice?.message;
-            if (!msg) break;
-
-            const toolCalls = msg.tool_calls;
-            if (toolCalls?.length) {
-                messages.push({
-                    role: "assistant",
-                    content: msg.content || null,
-                    tool_calls: toolCalls,
-                });
-
-                for (const call of toolCalls) {
-                    const name = call.function?.name;
-                    const args = parseToolArgs(call.function?.arguments);
-                    console.log(
-                        `[agent] tool=${name} user=${user.email || user._id} role=${user.role} args=${JSON.stringify(args)}`
-                    );
-                    const toolResult = await runAgentTool(user, name, args);
-                    messages.push({
-                        role: "tool",
-                        tool_call_id: call.id,
-                        content: JSON.stringify(toolResult),
-                    });
-                }
-                continue;
-            }
-
-            finalText = String(msg.content || "").trim();
-            break;
+        if (useGeminiForText()) {
+            yield* agentChatStreamGemini({ user, message: q, history });
+        } else {
+            yield* agentChatStreamOpenAI({ user, message: q, history });
         }
-
-        if (!finalText) {
-            finalText =
-                "I looked that up but could not form an answer. Please try rephrasing, or tell me the device ID.";
-        }
-
-        for await (const ev of softStreamText(finalText)) {
-            yield ev;
-        }
-        yield { type: "done" };
     } catch (err) {
         console.error("[agentChatStream]", err.message || err);
         yield {
@@ -226,3 +327,4 @@ module.exports = {
     SYSTEM_INSTRUCTION,
     buildLoggedInUserContext,
 };
+

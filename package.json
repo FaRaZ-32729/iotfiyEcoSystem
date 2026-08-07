@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google/genai": "^2.16.0",
     "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.76.7",

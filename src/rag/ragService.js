@@ -4,6 +4,12 @@ const {
     getChatModelName,
     getEmbedModelName,
 } = require("./openaiClient");
+const {
+    getGeminiClient,
+    getGeminiChatModelName,
+    getGeminiEmbedModelName,
+    useGeminiForText,
+} = require("./geminiClient");
 
 const SYSTEM_PROMPT = `You are the friendly ecoSystem Support assistant for the IOTFIY ecoSystem IoT app.
 
@@ -42,7 +48,7 @@ function cosineSimilarity(a, b) {
     return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-async function embedText(text) {
+async function embedTextOpenAI(text) {
     const openai = getOpenAIClient();
     const result = await openai.embeddings.create({
         model: getEmbedModelName(),
@@ -53,6 +59,29 @@ async function embedText(text) {
         throw new Error("Empty embedding from OpenAI");
     }
     return values;
+}
+
+async function embedTextGemini(text) {
+    const ai = getGeminiClient();
+    const result = await ai.models.embedContent({
+        model: getGeminiEmbedModelName(),
+        contents: String(text || "").slice(0, 8000),
+    });
+    const values =
+        result?.embeddings?.[0]?.values ||
+        result?.embedding?.values ||
+        null;
+    if (!values?.length) {
+        throw new Error("Empty embedding from Gemini");
+    }
+    return values;
+}
+
+async function embedText(text) {
+    if (useGeminiForText()) {
+        return embedTextGemini(text);
+    }
+    return embedTextOpenAI(text);
 }
 
 async function embedDocument(text) {
@@ -135,18 +164,28 @@ async function chat({ message, history = [] }) {
 
     const chunks = await retrieve(q, 5);
     const prompt = buildPrompt(q, buildContext(chunks), history);
-    const openai = getOpenAIClient();
-    const result = await openai.chat.completions.create({
-        model: getChatModelName(),
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.4,
-    });
-    const answer =
-        result?.choices?.[0]?.message?.content ||
-        "Sorry, I could not generate an answer.";
+
+    let answer;
+    if (useGeminiForText()) {
+        const ai = getGeminiClient();
+        const result = await ai.models.generateContent({
+            model: getGeminiChatModelName(),
+            contents: prompt,
+            config: { temperature: 0.4 },
+        });
+        answer = result?.text;
+    } else {
+        const openai = getOpenAIClient();
+        const result = await openai.chat.completions.create({
+            model: getChatModelName(),
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.4,
+        });
+        answer = result?.choices?.[0]?.message?.content;
+    }
 
     return {
-        answer: String(answer).trim(),
+        answer: String(answer || "Sorry, I could not generate an answer.").trim(),
         sources: mapSources(chunks),
     };
 }
@@ -161,18 +200,32 @@ async function* chatStream({ message, history = [] }) {
     try {
         const chunks = await retrieve(q, 5);
         const prompt = buildPrompt(q, buildContext(chunks), history);
-        const openai = getOpenAIClient();
-        const stream = await openai.chat.completions.create({
-            model: getChatModelName(),
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.4,
-            stream: true,
-        });
 
-        for await (const part of stream) {
-            const text = part?.choices?.[0]?.delta?.content;
-            if (text) {
-                yield { type: "token", text };
+        if (useGeminiForText()) {
+            const ai = getGeminiClient();
+            const stream = await ai.models.generateContentStream({
+                model: getGeminiChatModelName(),
+                contents: prompt,
+                config: { temperature: 0.4 },
+            });
+            for await (const chunk of stream) {
+                const text = chunk?.text;
+                if (text) yield { type: "token", text };
+            }
+        } else {
+            const openai = getOpenAIClient();
+            const stream = await openai.chat.completions.create({
+                model: getChatModelName(),
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.4,
+                stream: true,
+            });
+
+            for await (const part of stream) {
+                const text = part?.choices?.[0]?.delta?.content;
+                if (text) {
+                    yield { type: "token", text };
+                }
             }
         }
 
@@ -193,3 +246,4 @@ module.exports = {
     chatStream,
     cosineSimilarity,
 };
+
