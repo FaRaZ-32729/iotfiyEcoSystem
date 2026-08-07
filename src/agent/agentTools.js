@@ -3,11 +3,74 @@ const Venue = require("../models/venueModel");
 const Device = require("../models/deviceModel");
 const User = require("../models/userModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
+const Event = require("../models/eventModel");
+const TriggerSchedule = require("../models/triggerEventModel");
 const { retrieve } = require("../rag/ragService");
 const { fetchSensorHistory } = require("../services/sensorHistoryService");
+const {
+    getCurrentOrNextScheduleData,
+} = require("../services/scheduleLookupService");
 
 const DEVICE_LIST_SELECT =
     "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert energyMonitoringIncluded";
+
+/**
+ * Match Dashboard device-card LED (useDeviceWebSocket):
+ * - Card does NOT use MongoDB status alone.
+ * - Online when live MQTT status/data arrives over WebSocket.
+ * - Backup: if no data for 90s → offline (60s interval + 30s grace).
+ * Agent has no live WS, so approximate with lastUpdateTime / lastSeen freshness (same 90s).
+ */
+const ONLINE_STALE_MS = 90 * 1000;
+
+function computeConnectivity(d) {
+    const dbStatus = String(d?.status || "offline").toLowerCase();
+    const now = Date.now();
+    const lastSeenMs = d?.lastSeen ? new Date(d.lastSeen).getTime() : 0;
+    const lastUpdateMs = d?.lastUpdateTime
+        ? new Date(d.lastUpdateTime).getTime()
+        : 0;
+    // Prefer sensor/data activity (same idea as WS receivedAt); fall back to status lastSeen.
+    const freshest = Math.max(lastUpdateMs || 0, lastSeenMs || 0);
+    const ageMs = freshest ? now - freshest : null;
+    const recentlyActive =
+        ageMs != null && ageMs >= 0 && ageMs <= ONLINE_STALE_MS;
+
+    // Mirror card: start from "offline unless recently heard" — do not trust sticky DB online.
+    let isOnline = false;
+    let reason = "no_recent_activity";
+
+    if (dbStatus === "offline" && !recentlyActive) {
+        isOnline = false;
+        reason = "db_status_offline";
+    } else if (recentlyActive) {
+        isOnline = true;
+        reason =
+            lastUpdateMs && lastUpdateMs === freshest
+                ? "recent_data_within_90s"
+                : "recent_status_within_90s";
+    } else if (dbStatus === "online") {
+        isOnline = false;
+        reason = "db_online_but_stale_over_90s_like_dashboard";
+    } else {
+        isOnline = false;
+        reason = "offline";
+    }
+
+    return {
+        dbStatus,
+        isOnline,
+        connectivity: isOnline ? "online" : "offline",
+        lastActivityAt: freshest ? new Date(freshest).toISOString() : null,
+        lastActivityAgeSeconds:
+            ageMs != null && ageMs >= 0 ? Math.round(ageMs / 1000) : null,
+        lastActivityAgeMinutes:
+            ageMs != null && ageMs >= 0 ? Math.round(ageMs / 60000) : null,
+        connectivityNote: reason,
+        matchesDashboardCardLogic:
+            "Same 90s presence idea as device-card LED (WS data/status). dbStatus alone can be sticky/wrong.",
+    };
+}
 
 /**
  * Resolve venue ObjectIds this user is allowed to see.
@@ -50,6 +113,7 @@ function slimDevice(d) {
         category === "scheduling" ||
         category === "trigger" ||
         d.deviceType === "AC";
+    const connectivity = computeConnectivity(d);
     return {
         deviceId: d.deviceId,
         deviceName: d.deviceName,
@@ -62,7 +126,13 @@ function slimDevice(d) {
                 : canHaveSchedules
                   ? "This device can use scheduling/trigger features in the dashboard."
                   : null,
-        status: d.status,
+        // Prefer isOnline / connectivity for answers — dbStatus alone can be stale.
+        status: connectivity.connectivity,
+        isOnline: connectivity.isOnline,
+        dbStatus: connectivity.dbStatus,
+        connectivityNote: connectivity.connectivityNote,
+        lastActivityAt: connectivity.lastActivityAt,
+        lastActivityAgeMinutes: connectivity.lastActivityAgeMinutes,
         state: d.state,
         venueName: d.venue?.name || null,
         organizationName: d.venue?.organization?.name || null,
@@ -98,6 +168,62 @@ function slimDevice(d) {
             current: d.currentAlert,
             acHealth: d.acHealthAlert,
         },
+    };
+}
+
+function slimScheduleEvent(ev) {
+    if (!ev) return null;
+    return {
+        eventId: String(ev._id),
+        deviceId: ev.deviceId,
+        startTimeUtc: ev.startTime,
+        endTimeUtc: ev.endTime || null,
+        days: ev.days || [],
+        command: ev.command || null,
+        setTemperature: ev.setTemperature ?? null,
+        status: ev.status,
+        isRecurring: !!ev.isRecurring,
+        isOvernight: !!ev.isOvernight,
+        intervalSeconds: ev.intervalSeconds ?? null,
+        createdAt: ev.createdAt || null,
+    };
+}
+
+function utcNowClock() {
+    const now = new Date();
+    const currentTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
+        now.getUTCMinutes()
+    ).padStart(2, "0")}`;
+    const currentDay = now
+        .toLocaleString("en-US", { weekday: "long", timeZone: "UTC" })
+        .toLowerCase();
+    return { now, currentTime, currentDay };
+}
+
+/**
+ * Upcoming trigger fire (triggers have startTime only, no end window).
+ */
+function getNextTriggerFromList(events = []) {
+    const { currentTime, currentDay } = utcNowClock();
+    let next = null;
+
+    for (const ev of events) {
+        if (String(ev.status || "").toUpperCase() !== "ACTIVE") continue;
+        const days = (ev.days || []).map((d) => String(d).toLowerCase());
+        const isRecurring = !!ev.isRecurring && days.length > 0;
+        if (isRecurring && !days.includes(currentDay)) continue;
+
+        if (currentTime < ev.startTime) {
+            if (!next || ev.startTime < next.startTime) next = ev;
+        }
+    }
+
+    if (!next) return { type: "NO_EVENT", event: null, message: "No upcoming trigger today" };
+    return {
+        type: "NEXT",
+        event: slimScheduleEvent(next),
+        isTrigger: true,
+        note: "Trigger events fire at startTime (UTC); they do not have an end window.",
     };
 }
 
@@ -239,9 +365,11 @@ async function listMyDevices(user, args = {}) {
                 ? "Multiple devices matched. Ask the user for deviceId (unique) or exact deviceName."
                 : undefined,
         capabilityReminder:
-            "Schedules only for category scheduling/trigger (and AC). Monitoring devices cannot have schedules. All tools are read-only.",
+            "Schedules only for category scheduling/trigger (and AC). Monitoring devices cannot have schedules. All tools are read-only. For online/offline use isOnline/connectivity — not raw dbStatus alone (can be stale).",
         alertReminder:
             "For 'which devices have alerts?' do NOT use this list. Call listMyActiveAlerts — Dashboard Alerts panel only shows devices with at least one alert flag true.",
+        eventReminder:
+            "For schedules/events (upcoming, current, AC setpoint on event, devices with events) call getDeviceEvents, getCurrentOrNextEvent, or listDevicesWithEvents — do NOT guess.",
     };
 }
 
@@ -492,7 +620,7 @@ async function resolveAccessibleDevice(user, { deviceId, deviceName } = {}) {
         device = await Device.findOne({
             deviceId: String(deviceId).trim().toUpperCase(),
         })
-            .select("deviceId deviceName deviceType venue")
+            .select("deviceId deviceName deviceType category venue status lastSeen lastUpdateTime")
             .lean();
     } else {
         const venueIds = await getAccessibleVenueIds(user);
@@ -502,7 +630,7 @@ async function resolveAccessibleDevice(user, { deviceId, deviceName } = {}) {
         if (user.role !== "admin") filter.venue = { $in: venueIds };
 
         const matches = await Device.find(filter)
-            .select("deviceId deviceName deviceType venue")
+            .select("deviceId deviceName deviceType category venue status lastSeen lastUpdateTime")
             .lean();
 
         if (matches.length > 1) {
@@ -512,6 +640,7 @@ async function resolveAccessibleDevice(user, { deviceId, deviceName } = {}) {
                     deviceId: d.deviceId,
                     deviceName: d.deviceName,
                     deviceType: d.deviceType,
+                    category: d.category,
                 })),
             };
         }
@@ -522,6 +651,265 @@ async function resolveAccessibleDevice(user, { deviceId, deviceName } = {}) {
     const ok = await assertDeviceAccess(user, device);
     if (!ok) return { error: "You do not have access to this device" };
     return { device };
+}
+
+function formatScheduleLookup(info) {
+    if (!info) {
+        return { type: "NO_EVENT", event: null, message: "No schedule data" };
+    }
+    const base = {
+        type: info.type || "NO_EVENT",
+        message: info.message || null,
+        totalDurationMinutes: info.totalDurationMinutes ?? null,
+        totalDurationText: info.totalDurationText ?? null,
+        remainingMinutes: info.remainingMinutes ?? null,
+        remainingText: info.remainingText ?? null,
+        isTrigger: !!info.isTrigger,
+        event: slimScheduleEvent(info.event),
+    };
+    return base;
+}
+
+/**
+ * List all schedule/trigger events configured on a device (Events section).
+ */
+async function getDeviceEvents(user, args = {}) {
+    const resolved = await resolveAccessibleDevice(user, args);
+    if (resolved.error) return resolved;
+
+    const device = resolved.device;
+    const statusFilter = String(args.status || "ACTIVE").toUpperCase();
+    const wantAll = statusFilter === "ALL";
+
+    if (device.category === "monitoring" && device.deviceType !== "AC") {
+        return {
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            deviceType: device.deviceType,
+            category: device.category,
+            count: 0,
+            events: [],
+            message:
+                "Monitoring devices do not have ON/OFF schedules. Use getDeviceSnapshot for live readings.",
+        };
+    }
+
+    if (device.category === "trigger") {
+        const filter = { deviceId: device.deviceId };
+        if (!wantAll) filter.status = statusFilter;
+        const events = await TriggerSchedule.find(filter)
+            .sort({ startTime: 1 })
+            .lean();
+        return {
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            deviceType: device.deviceType,
+            category: "trigger",
+            eventKind: "trigger",
+            count: events.length,
+            events: events.map(slimScheduleEvent),
+            timesAreUtc: true,
+            instructionForAssistant:
+                "These are trigger schedules (fire at startTime UTC). They have no endTime or setTemperature. Answer from this list — do not say you don't know.",
+        };
+    }
+
+    // scheduling category + AC
+    const filter = { deviceId: device.deviceId };
+    if (!wantAll) filter.status = statusFilter;
+    const events = await Event.find(filter).sort({ startTime: 1 }).lean();
+    return {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        deviceType: device.deviceType,
+        category: device.category,
+        eventKind: "schedule",
+        count: events.length,
+        events: events.map(slimScheduleEvent),
+        timesAreUtc: true,
+        instructionForAssistant:
+            "These are scheduling/AC events. For AC ON events, setTemperature is the setpoint (°C). Times are UTC. Answer from this list.",
+    };
+}
+
+/**
+ * Current running window or next upcoming event for one device.
+ * Reuses dashboard schedule lookup for scheduling/AC.
+ */
+async function getCurrentOrNextEvent(user, args = {}) {
+    const resolved = await resolveAccessibleDevice(user, args);
+    if (resolved.error) return resolved;
+
+    const device = resolved.device;
+
+    if (device.category === "monitoring" && device.deviceType !== "AC") {
+        return {
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            type: "NO_EVENT",
+            event: null,
+            message: "Monitoring devices do not have schedules/events.",
+        };
+    }
+
+    if (device.category === "trigger") {
+        const events = await TriggerSchedule.find({
+            deviceId: device.deviceId,
+            status: "ACTIVE",
+        })
+            .sort({ startTime: 1 })
+            .lean();
+        const lookup = getNextTriggerFromList(events);
+        return {
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            deviceType: device.deviceType,
+            category: "trigger",
+            eventKind: "trigger",
+            ...lookup,
+            allActiveCount: events.length,
+            timesAreUtc: true,
+            instructionForAssistant:
+                "Report the NEXT trigger fire time from this result. Triggers have no running end window.",
+        };
+    }
+
+    const info = await getCurrentOrNextScheduleData(device.deviceId);
+    const formatted = formatScheduleLookup(info);
+    return {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        deviceType: device.deviceType,
+        category: device.category,
+        eventKind: "schedule",
+        ...formatted,
+        timesAreUtc: true,
+        instructionForAssistant:
+            "type=CURRENT means the event window is running now; type=NEXT is upcoming. For AC, include setTemperature when present. Times are UTC.",
+    };
+}
+
+/**
+ * Find devices that have ACTIVE schedules/triggers configured,
+ * and/or currently running (CURRENT) schedule windows.
+ */
+async function listDevicesWithEvents(user, args = {}) {
+    const venueIds = await getAccessibleVenueIds(user);
+    if (!venueIds.length && user.role !== "admin") {
+        return { count: 0, devices: [], message: "No accessible venues/devices" };
+    }
+
+    const deviceFilter = {};
+    if (user.role !== "admin") deviceFilter.venue = { $in: venueIds };
+    if (args.deviceType) {
+        deviceFilter.deviceType = String(args.deviceType).toUpperCase();
+    }
+    if (args.category) {
+        deviceFilter.category = String(args.category).toLowerCase().trim();
+    }
+    if (args.deviceId) {
+        deviceFilter.deviceId = String(args.deviceId).trim().toUpperCase();
+    }
+    if (args.deviceName) {
+        deviceFilter.deviceName = new RegExp(escapeRegex(args.deviceName), "i");
+    }
+    if (args.venueName) {
+        const venues = await Venue.find({
+            ...(user.role === "admin" ? {} : { _id: { $in: venueIds } }),
+            name: new RegExp(escapeRegex(args.venueName), "i"),
+        })
+            .select("_id")
+            .lean();
+        deviceFilter.venue = { $in: venues.map((v) => v._id) };
+    }
+
+    // Only devices that can have events
+    if (!deviceFilter.category && !deviceFilter.deviceType) {
+        deviceFilter.$or = [
+            { category: "scheduling" },
+            { category: "trigger" },
+            { deviceType: "AC" },
+        ];
+    }
+
+    const devices = await Device.find(deviceFilter)
+        .populate({
+            path: "venue",
+            select: "name organization",
+            populate: { path: "organization", select: "name" },
+        })
+        .select(
+            "deviceId deviceName deviceType category status lastSeen lastUpdateTime venue"
+        )
+        .lean();
+
+    if (!devices.length) {
+        return { count: 0, devices: [], message: "No scheduling/trigger/AC devices found" };
+    }
+
+    const ids = devices.map((d) => d.deviceId);
+    const onlyCurrentlyRunning = args.currentlyRunning === true;
+
+    const [scheduleEvents, triggerEvents] = await Promise.all([
+        Event.find({ deviceId: { $in: ids }, status: "ACTIVE" }).lean(),
+        TriggerSchedule.find({ deviceId: { $in: ids }, status: "ACTIVE" }).lean(),
+    ]);
+
+    const schedulesByDevice = new Map();
+    for (const ev of scheduleEvents) {
+        if (!schedulesByDevice.has(ev.deviceId)) schedulesByDevice.set(ev.deviceId, []);
+        schedulesByDevice.get(ev.deviceId).push(ev);
+    }
+    const triggersByDevice = new Map();
+    for (const ev of triggerEvents) {
+        if (!triggersByDevice.has(ev.deviceId)) triggersByDevice.set(ev.deviceId, []);
+        triggersByDevice.get(ev.deviceId).push(ev);
+    }
+
+    const rows = [];
+    for (const d of devices) {
+        const isTrigger = d.category === "trigger";
+        const configured = isTrigger
+            ? triggersByDevice.get(d.deviceId) || []
+            : schedulesByDevice.get(d.deviceId) || [];
+
+        if (!configured.length) continue;
+
+        let lookup = null;
+        if (isTrigger) {
+            lookup = getNextTriggerFromList(configured);
+        } else {
+            lookup = formatScheduleLookup(
+                await getCurrentOrNextScheduleData(d.deviceId)
+            );
+        }
+
+        const isCurrentlyRunning = lookup?.type === "CURRENT";
+        if (onlyCurrentlyRunning && !isCurrentlyRunning) continue;
+
+        rows.push({
+            deviceId: d.deviceId,
+            deviceName: d.deviceName,
+            deviceType: d.deviceType,
+            category: d.category,
+            venueName: d.venue?.name || null,
+            organizationName: d.venue?.organization?.name || null,
+            ...computeConnectivity(d),
+            activeEventCount: configured.length,
+            events: configured.map(slimScheduleEvent),
+            currentOrNext: lookup,
+            hasCurrentlyRunningEvent: isCurrentlyRunning,
+        });
+    }
+
+    return {
+        count: rows.length,
+        currentlyRunningOnly: onlyCurrentlyRunning,
+        devices: rows,
+        timesAreUtc: true,
+        instructionForAssistant:
+            "Use this for 'which devices have events/schedules?' and 'kisi device par currently event lagi hai?'. For AC setpoints use event.setTemperature. Times are UTC. Prefer isOnline/connectivity over dbStatus.",
+    };
 }
 
 /**
@@ -1122,6 +1510,9 @@ const TOOL_IMPL = {
     listMyActiveAlerts: (user, args) => listMyActiveAlerts(user, args),
     getDeviceSnapshot: (user, args) => getDeviceSnapshot(user, args),
     getDeviceSensorHistory: (user, args) => getDeviceSensorHistory(user, args),
+    getDeviceEvents: (user, args) => getDeviceEvents(user, args),
+    getCurrentOrNextEvent: (user, args) => getCurrentOrNextEvent(user, args),
+    listDevicesWithEvents: (user, args) => listDevicesWithEvents(user, args),
     listMyTeamMembers: (user, args) => listMyTeamMembers(user, args),
     countMyTeamMembers: (user, args) => countMyTeamMembers(user, args),
     listAllManagers: (user, args) => listAllManagers(user, args),
@@ -1218,12 +1609,72 @@ const AGENT_TOOLS = [
         function: {
             name: "getDeviceSnapshot",
             description:
-                "READ-ONLY: Get one device's latest stored live metrics and settings. Prefer deviceId. Includes canHaveSchedules. Does not create or change anything.",
+                "READ-ONLY: Get one device's latest stored live metrics and settings. Prefer deviceId. Includes canHaveSchedules and isOnline (prefer over dbStatus). Does not create or change anything.",
             parameters: {
                 type: "object",
                 properties: {
                     deviceId: { type: "string" },
                     deviceName: { type: "string" },
+                },
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "getDeviceEvents",
+            description:
+                "REQUIRED for listing schedules/events on a device (Events section): AC schedules, scheduling-category devices, or trigger schedules. Returns start/end times (UTC), days, command, and AC setTemperature when set. Prefer deviceId. status defaults to ACTIVE; pass ALL for inactive too.",
+            parameters: {
+                type: "object",
+                properties: {
+                    deviceId: { type: "string" },
+                    deviceName: { type: "string" },
+                    status: {
+                        type: "string",
+                        description: "ACTIVE (default) | INACTIVE | ALL",
+                    },
+                },
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "getCurrentOrNextEvent",
+            description:
+                "REQUIRED for 'upcoming schedule/event', 'currently running event', or 'AC event pe temperature kya set hai' on ONE device. Returns type CURRENT|NEXT|NO_EVENT with event details (including setTemperature for AC). Prefer deviceId. Reuses dashboard schedule logic.",
+            parameters: {
+                type: "object",
+                properties: {
+                    deviceId: { type: "string" },
+                    deviceName: { type: "string" },
+                },
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "listDevicesWithEvents",
+            description:
+                "REQUIRED for 'kis devices par event/schedule lagi hai?', 'currently running events', AC/scheduling/trigger overview. Lists accessible devices that have ACTIVE events. Set currentlyRunning=true to only devices with a CURRENT schedule window. Optional filters: deviceType, category, deviceName, venueName, deviceId.",
+            parameters: {
+                type: "object",
+                properties: {
+                    currentlyRunning: {
+                        type: "boolean",
+                        description:
+                            "If true, only devices whose schedule window is CURRENTLY active",
+                    },
+                    deviceType: { type: "string" },
+                    category: {
+                        type: "string",
+                        description: "scheduling | trigger",
+                    },
+                    deviceName: { type: "string" },
+                    deviceId: { type: "string" },
+                    venueName: { type: "string" },
                 },
             },
         },
@@ -1379,6 +1830,9 @@ module.exports = {
     listMyActiveAlerts,
     getDeviceSnapshot,
     getDeviceSensorHistory,
+    getDeviceEvents,
+    getCurrentOrNextEvent,
+    listDevicesWithEvents,
     listMyTeamMembers,
     countMyTeamMembers,
     listAllManagers,
