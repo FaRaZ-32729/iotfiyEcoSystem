@@ -4,6 +4,7 @@ const Device = require("../models/deviceModel");
 const User = require("../models/userModel");
 const SubscriptionPlan = require("../models/subscriptionPlanModel");
 const { retrieve } = require("../rag/ragService");
+const { fetchSensorHistory } = require("../services/sensorHistoryService");
 
 const DEVICE_LIST_SELECT =
     "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert energyMonitoringIncluded";
@@ -476,6 +477,180 @@ async function getDeviceSnapshot(user, args = {}) {
     return { device: slimDevice(device) };
 }
 
+/**
+ * Resolve a device the user can access (by id or unique name).
+ */
+async function resolveAccessibleDevice(user, { deviceId, deviceName } = {}) {
+    if (!deviceId && !deviceName) {
+        return {
+            error: "Provide deviceId (preferred) or deviceName",
+        };
+    }
+
+    let device = null;
+    if (deviceId) {
+        device = await Device.findOne({
+            deviceId: String(deviceId).trim().toUpperCase(),
+        })
+            .select("deviceId deviceName deviceType venue")
+            .lean();
+    } else {
+        const venueIds = await getAccessibleVenueIds(user);
+        const filter = {
+            deviceName: new RegExp(`^${escapeRegex(deviceName)}$`, "i"),
+        };
+        if (user.role !== "admin") filter.venue = { $in: venueIds };
+
+        const matches = await Device.find(filter)
+            .select("deviceId deviceName deviceType venue")
+            .lean();
+
+        if (matches.length > 1) {
+            return {
+                error: "Multiple devices share this name. Ask for deviceId.",
+                matches: matches.map((d) => ({
+                    deviceId: d.deviceId,
+                    deviceName: d.deviceName,
+                    deviceType: d.deviceType,
+                })),
+            };
+        }
+        device = matches[0] || null;
+    }
+
+    if (!device) return { error: "Device not found" };
+    const ok = await assertDeviceAccess(user, device);
+    if (!ok) return { error: "You do not have access to this device" };
+    return { device };
+}
+
+/**
+ * Historical sensor series (same backend as Dashboard Download Modal).
+ * Averages/min/max are computed here — assistant must not invent them.
+ */
+async function getDeviceSensorHistory(user, args = {}) {
+    const resolved = await resolveAccessibleDevice(user, args);
+    if (resolved.error) return resolved;
+
+    const device = resolved.device;
+    let start;
+    let end;
+
+    if (args.start && args.end) {
+        start = new Date(args.start);
+        end = new Date(args.end);
+    } else if (args.lastHours != null || args.lastDays != null) {
+        end = new Date();
+        const hours =
+            args.lastHours != null
+                ? Number(args.lastHours)
+                : Number(args.lastDays) * 24;
+        if (!Number.isFinite(hours) || hours <= 0) {
+            return { error: "lastHours / lastDays must be a positive number" };
+        }
+        start = new Date(end.getTime() - hours * 3600 * 1000);
+    } else {
+        end = new Date();
+        start = new Date(end.getTime() - 24 * 3600 * 1000);
+    }
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return { error: "Invalid start/end date" };
+    }
+    if (end < start) return { error: "end must be after start" };
+
+    const mode = String(args.mode || "summary").toLowerCase();
+    const wantRows = mode === "samples" || mode === "both";
+    const maxRows = wantRows
+        ? Math.min(Math.max(parseInt(args.maxRows, 10) || 36, 1), 72)
+        : null;
+
+    let intervalValue =
+        args.intervalValue != null ? args.intervalValue : undefined;
+    let intervalUnit = args.intervalUnit
+        ? String(args.intervalUnit).toLowerCase()
+        : undefined;
+
+    // Auto-bucket long ranges so we do not pull every raw minute into memory
+    let autoInterval = false;
+    if (
+        (intervalValue == null || String(intervalValue).trim() === "") &&
+        !intervalUnit
+    ) {
+        const spanMs = end.getTime() - start.getTime();
+        if (spanMs > 7 * 86400000) {
+            intervalValue = 4;
+            intervalUnit = "h";
+            autoInterval = true;
+        } else if (spanMs > 2 * 86400000) {
+            intervalValue = 1;
+            intervalUnit = "h";
+            autoInterval = true;
+        } else if (spanMs > 6 * 3600000) {
+            intervalValue = 15;
+            intervalUnit = "m";
+            autoInterval = true;
+        }
+    }
+
+    const result = await fetchSensorHistory({
+        deviceId: device.deviceId,
+        start,
+        end,
+        intervalValue,
+        intervalUnit,
+        includeSummary: true,
+        maxRows: wantRows ? maxRows : null,
+    });
+
+    if (!result.ok && result.historicalStorageAvailable === false) {
+        return {
+            historicalStorageAvailable: false,
+            deviceId: result.deviceId || device.deviceId,
+            deviceName: result.deviceName || device.deviceName,
+            deviceType: result.deviceType || device.deviceType,
+            message: result.message,
+            hintForAssistant: result.hintForAssistant,
+            suggestion: "Call getDeviceSnapshot for the latest live reading.",
+        };
+    }
+
+    if (!result.ok) {
+        return { error: result.message || "Failed to fetch sensor history" };
+    }
+
+    const base = {
+        historicalStorageAvailable: true,
+        deviceId: result.deviceId,
+        deviceName: result.deviceName,
+        deviceType: result.deviceType,
+        range: { start: result.start, end: result.end },
+        interval: result.interval,
+        autoIntervalApplied: autoInterval || undefined,
+        fields: result.fields,
+        pointCount: result.count,
+        summary: result.summary,
+        totalUnitsKWh: result.totalUnits,
+    };
+
+    if (!wantRows) {
+        return {
+            ...base,
+            instructionForAssistant:
+                "Use summary averages/min/max (server-computed). If pointCount is 0, say no stored samples in that range. Never invent readings.",
+        };
+    }
+
+    return {
+        ...base,
+        sampleRows: result.rows,
+        truncated: result.truncated,
+        returnedRowCount: result.returnedRowCount,
+        instructionForAssistant:
+            "Summarize with summary stats; use sampleRows only if the user wants point-by-point values. Never invent readings.",
+    };
+}
+
 async function computeManagerUsageStats(managerId, plan) {
     if (!plan) {
         return {
@@ -911,6 +1086,7 @@ const TOOL_IMPL = {
     listMyDevices: (user, args) => listMyDevices(user, args),
     listMyActiveAlerts: (user, args) => listMyActiveAlerts(user, args),
     getDeviceSnapshot: (user, args) => getDeviceSnapshot(user, args),
+    getDeviceSensorHistory: (user, args) => getDeviceSensorHistory(user, args),
     listMyTeamMembers: (user, args) => listMyTeamMembers(user, args),
     countMyTeamMembers: (user, args) => countMyTeamMembers(user, args),
     listAllManagers: (user, args) => listAllManagers(user, args),
@@ -1020,6 +1196,53 @@ const AGENT_TOOLS = [
     {
         type: "function",
         function: {
+            name: "getDeviceSensorHistory",
+            description:
+                "READ-ONLY historical sensor data from the same Mongo clusters as Dashboard Download Modal. Use for: last week/day readings, date-range history, averages/min/max, or interval buckets (e.g. every 4 hours). Prefer deviceId. For averages use mode=summary (server computes avg/min/max — do not invent). For point lists use mode=samples or both with intervalValue+intervalUnit (m|h|d). If cluster URL missing, tool reports historicalStorageAvailable=false — then call getDeviceSnapshot for latest live only.",
+            parameters: {
+                type: "object",
+                properties: {
+                    deviceId: { type: "string" },
+                    deviceName: { type: "string" },
+                    start: {
+                        type: "string",
+                        description: "ISO start datetime (optional if lastDays/lastHours set)",
+                    },
+                    end: {
+                        type: "string",
+                        description: "ISO end datetime",
+                    },
+                    lastDays: {
+                        type: "number",
+                        description: "Relative range ending now, e.g. 7 for last week",
+                    },
+                    lastHours: {
+                        type: "number",
+                        description: "Relative range ending now in hours",
+                    },
+                    intervalValue: {
+                        type: "number",
+                        description: "Bucket size, e.g. 4 with intervalUnit=h",
+                    },
+                    intervalUnit: {
+                        type: "string",
+                        description: "m | h | d",
+                    },
+                    mode: {
+                        type: "string",
+                        description: "summary (default) | samples | both",
+                    },
+                    maxRows: {
+                        type: "number",
+                        description: "Max sample rows when mode includes samples (default 36, max 72)",
+                    },
+                },
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
             name: "listAllManagers",
             description:
                 "ADMIN ONLY. List all managers on the platform with subscription plan (free/basic/premium/custom), active/inactive status, usage vs limits (orgs/venues/devices/team users), and which limits are full. Use for: 'kitne managers hain?', 'premium plan wale managers', 'kis manager ki org limit full hai?'. Optional filters: planType, atLimit (organizations|venues|devices|users), managerEmail, managerName, isActive.",
@@ -1116,6 +1339,7 @@ module.exports = {
     listMyDevices,
     listMyActiveAlerts,
     getDeviceSnapshot,
+    getDeviceSensorHistory,
     listMyTeamMembers,
     countMyTeamMembers,
     listAllManagers,
