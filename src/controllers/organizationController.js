@@ -328,4 +328,4 @@ const deleteOrganization = async (req, res) => {
     }
 };
 
-module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations, deleteOrganization };
+module.exports = { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations, updateOrganization, deleteOrganization };
