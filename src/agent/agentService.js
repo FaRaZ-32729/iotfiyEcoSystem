@@ -3,9 +3,9 @@ const {
     getChatModelName,
 } = require("../rag/openaiClient");
 const {
-    getGeminiClient,
     getGeminiChatModelName,
     useGeminiForText,
+    withGeminiRetry,
 } = require("../rag/geminiClient");
 const { runAgentTool, AGENT_TOOLS } = require("./agentTools");
 const {
@@ -146,7 +146,6 @@ function parseToolArgs(raw) {
 }
 
 async function* agentChatStreamGemini({ user, message, history = [] }) {
-    const ai = getGeminiClient();
     const model = getGeminiChatModelName();
     const systemInstruction = `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`;
     const functionDeclarations = toGeminiFunctionDeclarations(AGENT_TOOLS);
@@ -160,16 +159,18 @@ async function* agentChatStreamGemini({ user, message, history = [] }) {
     let finalText = "";
 
     for (let round = 0; round < maxRounds; round++) {
-        const response = await ai.models.generateContent({
-            model,
-            contents,
-            config: {
-                systemInstruction,
-                temperature: 0.2,
-                tools: [{ functionDeclarations }],
-                automaticFunctionCalling: { disable: true },
-            },
-        });
+        const response = await withGeminiRetry((ai) =>
+            ai.models.generateContent({
+                model,
+                contents,
+                config: {
+                    systemInstruction,
+                    temperature: 0.2,
+                    tools: [{ functionDeclarations }],
+                    automaticFunctionCalling: { disable: true },
+                },
+            })
+        );
 
         const calls = extractFunctionCalls(response);
         if (calls?.length) {

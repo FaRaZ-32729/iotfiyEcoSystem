@@ -5,10 +5,10 @@ const {
     getEmbedModelName,
 } = require("./openaiClient");
 const {
-    getGeminiClient,
     getGeminiChatModelName,
     getGeminiEmbedModelName,
     useGeminiForText,
+    withGeminiRetry,
 } = require("./geminiClient");
 
 const SYSTEM_PROMPT = `You are the friendly ecoSystem Support assistant for the IOTFIY ecoSystem IoT app.
@@ -62,11 +62,12 @@ async function embedTextOpenAI(text) {
 }
 
 async function embedTextGemini(text) {
-    const ai = getGeminiClient();
-    const result = await ai.models.embedContent({
-        model: getGeminiEmbedModelName(),
-        contents: String(text || "").slice(0, 8000),
-    });
+    const result = await withGeminiRetry((ai) =>
+        ai.models.embedContent({
+            model: getGeminiEmbedModelName(),
+            contents: String(text || "").slice(0, 8000),
+        })
+    );
     const values =
         result?.embeddings?.[0]?.values ||
         result?.embedding?.values ||
@@ -167,12 +168,13 @@ async function chat({ message, history = [] }) {
 
     let answer;
     if (useGeminiForText()) {
-        const ai = getGeminiClient();
-        const result = await ai.models.generateContent({
-            model: getGeminiChatModelName(),
-            contents: prompt,
-            config: { temperature: 0.4 },
-        });
+        const result = await withGeminiRetry((ai) =>
+            ai.models.generateContent({
+                model: getGeminiChatModelName(),
+                contents: prompt,
+                config: { temperature: 0.4 },
+            })
+        );
         answer = result?.text;
     } else {
         const openai = getOpenAIClient();
@@ -202,12 +204,13 @@ async function* chatStream({ message, history = [] }) {
         const prompt = buildPrompt(q, buildContext(chunks), history);
 
         if (useGeminiForText()) {
-            const ai = getGeminiClient();
-            const stream = await ai.models.generateContentStream({
-                model: getGeminiChatModelName(),
-                contents: prompt,
-                config: { temperature: 0.4 },
-            });
+            const stream = await withGeminiRetry((ai) =>
+                ai.models.generateContentStream({
+                    model: getGeminiChatModelName(),
+                    contents: prompt,
+                    config: { temperature: 0.4 },
+                })
+            );
             for await (const chunk of stream) {
                 const text = chunk?.text;
                 if (text) yield { type: "token", text };

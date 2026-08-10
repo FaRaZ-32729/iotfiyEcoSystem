@@ -4,12 +4,12 @@ const {
     getRealtimeModelName,
 } = require("../rag/openaiClient");
 const {
-    getGeminiClient,
-    getGeminiLiveClient,
     getGeminiChatModelName,
     getGeminiLiveModelName,
     useGeminiForText,
     useGeminiForLiveVoice,
+    withGeminiRetry,
+    withGeminiLiveRetry,
 } = require("../rag/geminiClient");
 const { AGENT_TOOLS, runAgentTool } = require("./agentTools");
 const {
@@ -83,7 +83,6 @@ function buildGeminiLiveTools() {
  * Config is returned to the client (token alone cannot lock all Live setup fields reliably).
  */
 async function createGeminiLiveSession(user) {
-    const ai = getGeminiLiveClient();
     const model = getGeminiLiveModelName();
     const voiceName = process.env.GEMINI_LIVE_VOICE || "Alnilam";
     const instructions = buildVoiceInstructions(user);
@@ -102,13 +101,15 @@ async function createGeminiLiveSession(user) {
     };
 
     // Unlocked token — client applies liveConfig on connect (avoids field_mask errors).
-    const token = await ai.authTokens.create({
-        config: {
-            uses: 1,
-            newSessionExpireTime: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
-            expireTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-        },
-    });
+    const token = await withGeminiLiveRetry((ai) =>
+        ai.authTokens.create({
+            config: {
+                uses: 1,
+                newSessionExpireTime: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
+                expireTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+            },
+        })
+    );
 
     if (!token?.name) {
         throw new Error("Failed to create Gemini Live ephemeral token");
@@ -226,12 +227,13 @@ Rules:
     const userPrompt = `User said:\n${String(userText || "(unknown)").trim()}\n\nAssistant spoke:\n${spoken}`;
     try {
         if (useGeminiForText()) {
-            const ai = getGeminiClient();
-            const result = await ai.models.generateContent({
-                model: getGeminiChatModelName(),
-                contents: `${system}\n\n${userPrompt}`,
-                config: { temperature: 0.2 },
-            });
+            const result = await withGeminiRetry((ai) =>
+                ai.models.generateContent({
+                    model: getGeminiChatModelName(),
+                    contents: `${system}\n\n${userPrompt}`,
+                    config: { temperature: 0.2 },
+                })
+            );
             const out = String(result?.text || "").trim();
             return out || spoken;
         }
