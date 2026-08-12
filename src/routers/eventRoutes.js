@@ -1,19 +1,16 @@
-// src/routes/eventRoutes.js
 const express = require("express");
 const router = express.Router();
 const authenticate = require("../middlewares/auth");
+const requireManagerSubscription = require("../middlewares/requireManagerSubscription");
 const checkManagePermission = require("../middlewares/checkPermission");
 const { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule } = require("../controllers/eventController");
 
+const managerGate = [authenticate, requireManagerSubscription];
 
-router.post("/create", authenticate, checkManagePermission(), createSchedule);
-// for manual toggle you must have to give deviceId not _id
-router.post("/manual-toggle", authenticate, manualToggle);
-// here you have to use deviceId to get events of a device 
-router.get("/get/:deviceId", getEventsByDevice);
-// here you have to use _id of the event
-router.patch("/:id/status", toggleScheduleStatus);
-// here you have to use _id of the event
-router.delete("/delete/:id", deleteSchedule);
+router.post("/create", ...managerGate, checkManagePermission(), createSchedule);
+router.post("/manual-toggle", ...managerGate, manualToggle);
+router.get("/get/:deviceId", ...managerGate, getEventsByDevice);
+router.patch("/:id/status", ...managerGate, toggleScheduleStatus);
+router.delete("/delete/:id", ...managerGate, deleteSchedule);
 
 module.exports = router;

@@ -36,6 +36,7 @@ const subscriptionSchema = new mongoose.Schema({
         default: "active"
     },
 
+    // Legacy flag: Free plan often sets this true. Lifecycle uses status + endDate (no separate trial flow).
     isTrial: {
         type: Boolean,
         default: false
@@ -64,7 +65,10 @@ const subscriptionSchema = new mongoose.Schema({
 
 subscriptionSchema.pre('save', async function () {
     const now = new Date();
-    if (this.endDate < now && this.status === "active") {
+    if (
+        this.endDate < now &&
+        (this.status === "active" || this.status === "trial")
+    ) {
         this.status = "expired";
     }
 });

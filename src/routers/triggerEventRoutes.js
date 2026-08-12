@@ -1,19 +1,14 @@
-// routes/triggerScheduleRoutes.js
 const express = require("express");
 const router = express.Router();
 const authenticate = require("../middlewares/auth");
+const requireManagerSubscription = require("../middlewares/requireManagerSubscription");
 const { createTriggerSchedule, getTriggerEventsByDeviceID, toggleTriggerEventStatus, deleteTriggerEvent } = require("../controllers/triggerEventController");
 
-// Create Trigger Schedule
-router.post("/create-event", authenticate, createTriggerSchedule);
+const managerGate = [authenticate, requireManagerSubscription];
 
-// Get by Device ID
-router.get("/events/:deviceId", authenticate, getTriggerEventsByDeviceID);
-
-// Toggle Status
-router.patch("/:id/status", authenticate, toggleTriggerEventStatus);
-
-// Delete
-router.delete("/delete/:id", authenticate, deleteTriggerEvent);
+router.post("/create-event", ...managerGate, createTriggerSchedule);
+router.get("/events/:deviceId", ...managerGate, getTriggerEventsByDeviceID);
+router.patch("/:id/status", ...managerGate, toggleTriggerEventStatus);
+router.delete("/delete/:id", ...managerGate, deleteTriggerEvent);
 
 module.exports = router;

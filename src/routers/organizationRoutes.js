@@ -1,16 +1,17 @@
 const express = require("express");
 const { createOrganization, getAllOrganizations, getOrganizationsByOwner, getOrganizationById, getUserOrganizations, updateOrganization, deleteOrganization } = require("../controllers/organizationController");
 const authenticate = require("../middlewares/auth");
+const requireManagerSubscription = require("../middlewares/requireManagerSubscription");
 const router = express.Router();
 
+const managerGate = [authenticate, requireManagerSubscription];
 
-router.post("/create", authenticate, createOrganization);
-router.get("/all", getAllOrganizations);
-router.get("/owner/:ownerId", getOrganizationsByOwner);
-router.get("/single/:id", getOrganizationById);
-router.get("/my-organizations", authenticate, getUserOrganizations);
-router.put("/update/:id", authenticate, updateOrganization);
-router.delete("/delete-org/:id", authenticate, deleteOrganization);
-
+router.post("/create", ...managerGate, createOrganization);
+router.get("/all", ...managerGate, getAllOrganizations);
+router.get("/owner/:ownerId", ...managerGate, getOrganizationsByOwner);
+router.get("/single/:id", ...managerGate, getOrganizationById);
+router.get("/my-organizations", ...managerGate, getUserOrganizations);
+router.put("/update/:id", ...managerGate, updateOrganization);
+router.delete("/delete-org/:id", ...managerGate, deleteOrganization);
 
 module.exports = router;

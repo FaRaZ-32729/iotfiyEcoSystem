@@ -10,6 +10,10 @@ const { fetchSensorHistory } = require("../services/sensorHistoryService");
 const {
     getCurrentOrNextScheduleData,
 } = require("../services/scheduleLookupService");
+const {
+    MUTATION_TOOL_IMPL,
+    MUTATION_AGENT_TOOLS,
+} = require("./agentMutationTools");
 
 const DEVICE_LIST_SELECT =
     "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert energyMonitoringIncluded";
@@ -464,7 +468,7 @@ async function listMyDevices(user, args = {}) {
                 ? "Multiple devices matched. Ask the user for deviceId (unique) or exact deviceName."
                 : undefined,
         capabilityReminder:
-            "Schedules only for category scheduling/trigger (and AC). Monitoring devices cannot have schedules. All tools are read-only. For online/offline use isOnline/connectivity — not raw dbStatus alone (can be stale).",
+            "Schedules only for category scheduling/trigger (and AC). Monitoring devices cannot have schedules. Write tools exist for org/venue/device/team when the user is allowed. For online/offline use isOnline/connectivity — not raw dbStatus alone (can be stale).",
         alertReminder:
             "For 'which devices have alerts?' do NOT use this list. Call listMyActiveAlerts — Dashboard Alerts panel only shows devices with at least one alert flag true.",
         eventReminder:
@@ -1629,6 +1633,7 @@ const TOOL_IMPL = {
     getMySubscriptionUsage: (user, args) => getMySubscriptionUsage(user, args),
     listSubscriptionPlans: (user, args) => listSubscriptionPlans(user, args),
     searchHelpDocs: (user, args) => searchHelpDocs(user, args),
+    ...MUTATION_TOOL_IMPL,
 };
 
 async function runAgentTool(user, name, args = {}) {
@@ -1927,6 +1932,7 @@ const AGENT_TOOLS = [
             },
         },
     },
+    ...MUTATION_AGENT_TOOLS,
 ];
 
 module.exports = {

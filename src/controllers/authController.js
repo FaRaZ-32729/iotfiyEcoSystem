@@ -10,6 +10,64 @@ const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const { registerSchema, adminCreateUserSchema, createSubUserSchema } = require("../validations/userValidation");
 require("dotenv").config();
 
+function summarizeCurrentSubscription(sub) {
+    if (!sub) return null;
+    return {
+        id: sub._id,
+        status: sub.status,
+        startDate: sub.startDate,
+        endDate: sub.endDate,
+        plan: sub.plan
+            ? {
+                  id: sub.plan._id,
+                  name: sub.plan.name,
+                  type: sub.plan.type,
+              }
+            : null,
+    };
+}
+
+async function loadCurrentSubscription(userDoc) {
+    await userDoc.populate({
+        path: "currentSubscription",
+        populate: { path: "plan", select: "name type price durationDays" },
+    });
+    let sub = userDoc.currentSubscription;
+    if (
+        sub &&
+        sub.status === "active" &&
+        sub.endDate &&
+        new Date(sub.endDate) < new Date()
+    ) {
+        sub.status = "expired";
+        await sub.save();
+    }
+    return summarizeCurrentSubscription(sub);
+}
+
+/** For sub-users: status of their manager's plan (null | "active" | "expired" | "missing"). */
+async function loadManagerSubscriptionStatus(userDoc) {
+    if (userDoc.role !== "user" || !userDoc.creatorId) return null;
+
+    const manager = await User.findById(userDoc.creatorId).populate({
+        path: "currentSubscription",
+        populate: { path: "plan", select: "name type price durationDays" },
+    });
+    if (!manager) return "missing";
+
+    let sub = manager.currentSubscription;
+    if (!sub) return "missing";
+
+    if (
+        sub.status === "active" &&
+        sub.endDate &&
+        new Date(sub.endDate) < new Date()
+    ) {
+        sub.status = "expired";
+        await sub.save();
+    }
+    return sub.status || "expired";
+}
 
 // register Admin
 const registerAdmin = async (req, res) => {
@@ -657,6 +715,9 @@ const loginUser = async (req, res) => {
         user.lastLogin = new Date();
         await user.save();
 
+        const currentSubscription = await loadCurrentSubscription(user);
+        const managerSubscriptionStatus = await loadManagerSubscriptionStatus(user);
+
         res.cookie('token', token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
@@ -674,7 +735,9 @@ const loginUser = async (req, res) => {
                 email: user.email,
                 role: user.role,
                 isActive: user.isActive,
-                permission: user.permission || null
+                permission: user.permission || null,
+                currentSubscription,
+                managerSubscriptionStatus,
             }
         });
     } catch (error) {
@@ -803,15 +866,31 @@ const me = async (req, res) => {
     try {
         const user = req.user;
 
-        // Populate venues with venue details + organization info
-        const populatedUser = await user.populate({
-            path: 'venues.venueId',
-            select: 'name organization',
-            populate: {
-                path: 'organization',
-                select: 'name _id'   // Get organization name and id
-            }
-        });
+        const populatedUser = await user.populate([
+            {
+                path: "venues.venueId",
+                select: "name organization",
+                populate: {
+                    path: "organization",
+                    select: "name _id",
+                },
+            },
+            {
+                path: "currentSubscription",
+                populate: { path: "plan", select: "name type price durationDays" },
+            },
+        ]);
+
+        let sub = populatedUser.currentSubscription;
+        if (
+            sub &&
+            sub.status === "active" &&
+            sub.endDate &&
+            new Date(sub.endDate) < new Date()
+        ) {
+            sub.status = "expired";
+            await sub.save();
+        }
 
         const safeUser = {
             id: populatedUser._id,
@@ -824,22 +903,21 @@ const me = async (req, res) => {
             timer: populatedUser.timer,
             createdBy: populatedUser.createdBy,
             lastLogin: populatedUser.lastLogin,
-
-            // Organizations (array of IDs)
             organizations: populatedUser.organizations,
-
-            // Venues with full info + organization
-            venues: populatedUser.venues.map(v => ({
+            venues: populatedUser.venues.map((v) => ({
                 venueId: v.venueId?._id,
                 venueName: v.venueName || v.venueId?.name,
-                organization: v.venueId?.organization ? {
-                    id: v.venueId.organization._id,
-                    name: v.venueId.organization.name
-                } : null
+                organization: v.venueId?.organization
+                    ? {
+                          id: v.venueId.organization._id,
+                          name: v.venueId.organization.name,
+                      }
+                    : null,
             })),
-
-            // Subscription info
-            currentSubscription: populatedUser.currentSubscription
+            currentSubscription: summarizeCurrentSubscription(sub),
+            managerSubscriptionStatus: await loadManagerSubscriptionStatus(
+                populatedUser
+            ),
         };
 
         return res.status(200).json({

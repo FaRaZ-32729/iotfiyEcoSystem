@@ -60,6 +60,12 @@ const createOrganization = async (req, res) => {
         }
 
         console.error("Create Organization Error:", error);
+        if (error?.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: "You already have an organization with this name"
+            });
+        }
         res.status(500).json({
             success: false,
             message: "Server error while creating organization"

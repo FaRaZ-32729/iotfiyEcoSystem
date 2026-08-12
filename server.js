@@ -67,7 +67,8 @@ app.get("/", (req, res) => {
 global.io = io;
 initializeMQTT();
 
-// console.log(new Date().toUTCString());\
+const { startSubscriptionCron } = require("./src/services/subscriptionCron");
+startSubscriptionCron();
 
 // Start server
 server.listen(port, () => {

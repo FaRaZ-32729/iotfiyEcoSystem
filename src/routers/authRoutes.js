@@ -4,12 +4,19 @@ const { registerUser, loginUser, verifyOTP, setPassword, createUserByAdmin, regi
 const authenticate = require("../middlewares/auth");
 const checkPendingSubscription = require("../middlewares/checkPendingSubscription");
 const roleGuard = require("../middlewares/roleGuard");
+const requireManagerSubscription = require("../middlewares/requireManagerSubscription");
 const router = express.Router();
 
 // Routes
 router.post("/register-admin", registerAdmin);
 router.post("/register", checkPendingSubscription, registerUser);
-router.post("/register-user", authenticate, roleGuard(["manager"]), createSubUser);
+router.post(
+    "/register-user",
+    authenticate,
+    roleGuard(["manager"]),
+    requireManagerSubscription,
+    createSubUser
+);
 router.post("/login", loginUser);
 router.post("/verify-otp", verifyOTP);
 router.post("/verify-otp/:token", verifyOTP);

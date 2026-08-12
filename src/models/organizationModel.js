@@ -5,7 +5,7 @@ const organizationSchema = new mongoose.Schema({
     name: {
         type: String,
         trim: true,
-        unique: true
+        required: true,
     },
 
     // Current owner/manager
@@ -19,7 +19,12 @@ const organizationSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Index for faster search
+// Same name is allowed for different managers; unique only per owner.
 organizationSchema.index({ owner: 1, name: 1 }, { unique: true });
 
-module.exports = mongoose.model("Organization", organizationSchema);
+const Organization = mongoose.model("Organization", organizationSchema);
+
+// Drop leftover global unique-on-name index from older schema.
+Organization.collection.dropIndex("name_1").catch(() => {});
+
+module.exports = Organization;
