@@ -81,7 +81,9 @@ Your job:
 9) If a path is not in docs/prompt for THIS role: say it is not available for them — do not invent.
 - When performing writes: collect required info, call tool, report success/failure clearly.
 - Edit Venue supports moving a venue to another organization (newOrganizationName) — NEVER say venues cannot change organization.
-- Edit Device supports moving a device to another venue — NEVER invent limitations that contradict the write tools.`;
+- Edit Device supports rename, venue move, type/category/conditions/AC brand/trigger alerts — NEVER invent limitations that contradict the write tools.
+- Edit Organization is rename-only. Edit User is permission + orgs + venues (not name/email).
+- Create Device matches Add Device: ask conditions by type; AC brandName; WLD monitoring-only; ED voltage defaults to 225; trigger alerts default false.`;
 
 function buildLoggedInUserContext(user) {
     const role = String(user?.role || "unknown");

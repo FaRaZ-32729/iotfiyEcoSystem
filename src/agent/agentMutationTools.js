@@ -666,23 +666,159 @@ async function generateDeviceId() {
     }
 }
 
+const DEVICE_REQUIRED_CONDITIONS = {
+    OD: ["temperature", "humidity", "odour"],
+    THD: ["temperature", "humidity"],
+    AQID: ["temperature", "humidity", "AQI"],
+    SMD: ["smoke"],
+    WLD: [],
+    GLD: ["temperature", "humidity", "gass"],
+    ED: ["current"],
+    AC: [],
+};
+
+const DEFAULT_ED_VOLTAGE = 225;
+
+function applyTriggerAlertDefaults(deviceType, args = {}) {
+    const cfg = {
+        tempAlertAccess: false,
+        humiAlertAccess: false,
+        odourAlertAccess: false,
+        aqiAlertAccess: false,
+        smokeAlertAccess: false,
+        waterLeakAlertAccess: false,
+        glAlertAccess: false,
+        voltageAlertAccess: false,
+        currentAlertAccess: false,
+    };
+    for (const k of Object.keys(cfg)) {
+        if (typeof args[k] === "boolean") cfg[k] = args[k];
+    }
+    const dt = String(deviceType || "").toUpperCase();
+    if (dt === "OD") {
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "THD") {
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "AQID") {
+        cfg.odourAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "SMD") {
+        cfg.tempAlertAccess = false;
+        cfg.humiAlertAccess = false;
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "WLD") {
+        cfg.tempAlertAccess = false;
+        cfg.humiAlertAccess = false;
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "GLD") {
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    } else if (dt === "ED") {
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+    } else if (dt === "AC") {
+        cfg.odourAlertAccess = false;
+        cfg.aqiAlertAccess = false;
+        cfg.smokeAlertAccess = false;
+        cfg.glAlertAccess = false;
+        cfg.voltageAlertAccess = false;
+        cfg.currentAlertAccess = false;
+    }
+    return cfg;
+}
+
+function normalizeCreateConditions(deviceType, conditions) {
+    let list = Array.isArray(conditions) ? [...conditions] : [];
+    const dt = String(deviceType || "").toUpperCase();
+    if (dt === "AC" || dt === "WLD") return [];
+    // Same as Add Device UI: ED voltage defaults to 225 if omitted
+    if (dt === "ED" && !list.some((c) => c?.type === "voltage")) {
+        list.push({ type: "voltage", operator: "=", value: DEFAULT_ED_VOLTAGE });
+    }
+    return list;
+}
+
 async function createDevice(user, args = {}) {
     const denied = denyMutate(user);
     if (denied) return denied;
 
+    const deviceType = args.deviceType
+        ? String(args.deviceType).toUpperCase()
+        : "";
+    const category = args.category ? String(args.category).toLowerCase() : "";
+
     const missing = [];
     if (!args.deviceName) missing.push({ field: "deviceName", message: "Required" });
-    if (!args.deviceType) missing.push({ field: "deviceType", message: "OD|THD|AQID|GLD|ED|AC|SMD|WLD" });
-    if (!args.category) missing.push({ field: "category", message: "monitoring|scheduling|trigger" });
+    if (!deviceType) {
+        missing.push({
+            field: "deviceType",
+            message: "OD|THD|AQID|GLD|ED|AC|SMD|WLD",
+        });
+    }
+    if (!category) {
+        missing.push({
+            field: "category",
+            message: "monitoring|scheduling|trigger",
+        });
+    }
     if (!args.venueId && !args.venueName) {
         missing.push({ field: "venueName", message: "Venue name or venueId" });
     }
+    if (deviceType === "AC" && !args.brandName) {
+        missing.push({ field: "brandName", message: "Required for AC (Ackit brand)" });
+    }
+    if (deviceType === "WLD" && category && category !== "monitoring") {
+        return {
+            error: "Water Leakage Device (WLD) supports monitoring category only.",
+        };
+    }
+
+    const requiredConds = DEVICE_REQUIRED_CONDITIONS[deviceType] || [];
+    const providedTypes = (Array.isArray(args.conditions) ? args.conditions : []).map(
+        (c) => c?.type
+    );
+    for (const need of requiredConds) {
+        if (!providedTypes.includes(need)) {
+            missing.push({
+                field: "conditions",
+                message: `${need} condition required for ${deviceType} (type, operator >, < or =, value number)`,
+            });
+        }
+    }
+
     if (missing.length) {
         return {
-            error: "Missing required fields to create a device.",
+            error: "Missing required fields to create a device (same as Add Device).",
             needsFields: missing,
+            requiredConditionsByType: DEVICE_REQUIRED_CONDITIONS,
             instructionForAssistant:
-                "Ask for deviceName, deviceType, category, and venue. For AC also ask brandName. For sensors ask threshold conditions (type, operator, value). Then retry.",
+                "Ask for deviceName, deviceType, category, venue. AC → brandName. Sensors → conditions per requiredConditionsByType. Trigger → which alert accesses to enable (temp/humi/…). Then retry createDevice. ED voltage defaults to 225 if omitted.",
         };
     }
 
@@ -697,24 +833,22 @@ async function createDevice(user, args = {}) {
         return { error: "You cannot create devices in this venue." };
     }
 
+    const conditions = normalizeCreateConditions(deviceType, args.conditions);
+
+    // Trigger: default all alert flags false (like UI/API) so validation passes
+    const triggerAlerts =
+        category === "trigger" ? applyTriggerAlertDefaults(deviceType, args) : {};
+
     const body = {
         deviceName: String(args.deviceName).trim(),
         venueId: String(venue._id),
-        deviceType: String(args.deviceType).toUpperCase(),
-        category: String(args.category).toLowerCase(),
-        conditions: Array.isArray(args.conditions) ? args.conditions : [],
+        deviceType,
+        category,
+        conditions,
         interval: args.interval,
         energyMonitoringIncluded: args.energyMonitoringIncluded,
         brandName: args.brandName,
-        tempAlertAccess: args.tempAlertAccess,
-        humiAlertAccess: args.humiAlertAccess,
-        odourAlertAccess: args.odourAlertAccess,
-        aqiAlertAccess: args.aqiAlertAccess,
-        smokeAlertAccess: args.smokeAlertAccess,
-        waterLeakAlertAccess: args.waterLeakAlertAccess,
-        glAlertAccess: args.glAlertAccess,
-        voltageAlertAccess: args.voltageAlertAccess,
-        currentAlertAccess: args.currentAlertAccess,
+        ...triggerAlerts,
     };
 
     let validated;
@@ -751,17 +885,7 @@ async function createDevice(user, args = {}) {
 
     let alertAccessConfig = {};
     if (validated.category === "trigger") {
-        alertAccessConfig = {
-            tempAlertAccess: !!validated.tempAlertAccess,
-            humiAlertAccess: !!validated.humiAlertAccess,
-            odourAlertAccess: !!validated.odourAlertAccess,
-            aqiAlertAccess: !!validated.aqiAlertAccess,
-            smokeAlertAccess: !!validated.smokeAlertAccess,
-            waterLeakAlertAccess: !!validated.waterLeakAlertAccess,
-            glAlertAccess: !!validated.glAlertAccess,
-            voltageAlertAccess: !!validated.voltageAlertAccess,
-            currentAlertAccess: !!validated.currentAlertAccess,
-        };
+        alertAccessConfig = applyTriggerAlertDefaults(validated.deviceType, validated);
     }
 
     const deviceId = await generateDeviceId();
@@ -793,7 +917,7 @@ async function createDevice(user, args = {}) {
 
     return {
         success: true,
-        message: "Device created successfully.",
+        message: "Device created successfully (same rules as Add Device).",
         device: {
             id: String(device._id),
             deviceId: device.deviceId,
@@ -802,10 +926,13 @@ async function createDevice(user, args = {}) {
             category: device.category,
             venueId: String(venue._id),
             venueName: venue.name,
+            organizationName: org.name,
             apiKey: device.apiKey,
+            brandName: device.brandName || null,
+            conditions: device.conditions || [],
         },
         instructionForAssistant:
-            "Tell the user the device was created and share deviceId (and apiKey if they need to configure hardware). Do not invent extra fields.",
+            "Tell the user it was created and share deviceId (and apiKey if they need hardware setup). Do not invent extra fields.",
     };
 }
 
@@ -841,7 +968,7 @@ async function updateDevice(user, args = {}) {
         };
     }
 
-    // Access: venue must be accessible
+    // Access: current venue must be accessible
     const venue = await Venue.findById(device.venue).populate("organization", "owner");
     if (!venue) return { error: "Device venue not found." };
     const org = await Organization.findById(
@@ -851,16 +978,40 @@ async function updateDevice(user, args = {}) {
         return { error: "You do not have access to update this device." };
     }
 
+    // Build patch — same fields as Edit Device modal
     const patch = {};
-    if (args.newDeviceName || args.deviceName) {
-        patch.deviceName = String(args.newDeviceName || args.deviceName).trim();
+    // Rename only via newDeviceName (deviceName is identity when finding)
+    if (args.newDeviceName) {
+        patch.deviceName = String(args.newDeviceName).trim();
     }
-    if (args.venueId || args.venueName) {
-        const vr = await resolveVenue(user, args);
+
+    if (args.venueId || args.venueName || args.newVenueId || args.newVenueName) {
+        const vr = await resolveVenue(user, {
+            venueId: args.newVenueId || args.venueId,
+            venueName: args.newVenueName || args.venueName,
+            organizationId: args.organizationId || args.newOrganizationId,
+        });
         if (vr.error) return vr;
-        patch.venueId = String(vr.venue._id);
+        const newVenue = vr.venue;
+        const newOrg = await Organization.findById(
+            newVenue.organization?._id || newVenue.organization
+        );
+        // Mirror API: moving device requires owning the target org
+        if (
+            user.role !== "admin" &&
+            (!newOrg || String(newOrg.owner) !== String(user._id))
+        ) {
+            return {
+                error:
+                    "You can only move a device into a venue whose organization you own (same as Edit Device API).",
+            };
+        }
+        if (String(newVenue._id) !== String(device.venue)) {
+            patch.venueId = String(newVenue._id);
+        }
     }
-    if (args.category) patch.category = args.category;
+
+    if (args.category) patch.category = String(args.category).toLowerCase();
     if (args.deviceType) patch.deviceType = String(args.deviceType).toUpperCase();
     if (args.conditions) patch.conditions = args.conditions;
     if (args.brandName) patch.brandName = args.brandName;
@@ -869,16 +1020,33 @@ async function updateDevice(user, args = {}) {
         patch.energyMonitoringIncluded = args.energyMonitoringIncluded;
     }
 
+    const alertKeys = [
+        "tempAlertAccess",
+        "humiAlertAccess",
+        "odourAlertAccess",
+        "aqiAlertAccess",
+        "smokeAlertAccess",
+        "waterLeakAlertAccess",
+        "glAlertAccess",
+        "voltageAlertAccess",
+        "currentAlertAccess",
+    ];
+    for (const k of alertKeys) {
+        if (typeof args[k] === "boolean") patch[k] = args[k];
+    }
+
     if (!Object.keys(patch).length) {
         return {
             error:
-                "Nothing to update. Provide newDeviceName and/or venueName/venueId to move (same as Edit Device).",
+                "Nothing to update. Edit Device supports: rename, move venue, deviceType, category, conditions, AC brandName, energyMonitoringIncluded, trigger alert-access flags.",
             needsFields: [
-                { field: "newDeviceName", message: "Optional rename" },
-                { field: "venueName", message: "Optional — move device to another venue" },
+                { field: "newDeviceName", message: "Rename" },
+                { field: "newVenueName", message: "Move to another venue" },
+                { field: "category", message: "monitoring | scheduling | trigger" },
+                { field: "conditions", message: "Thresholds for sensor devices" },
             ],
             instructionForAssistant:
-                "Device edit supports rename AND changing venue. Ask what to change, then retry.",
+                "Ask what to change (same options as Edit Device UI), then retry updateDevice. Never invent unsupported limitations.",
         };
     }
 
@@ -902,23 +1070,64 @@ async function updateDevice(user, args = {}) {
     if (validated.category) device.category = validated.category;
     if (validated.deviceType) device.deviceType = validated.deviceType;
     if (validated.conditions) device.conditions = validated.conditions;
-    if (validated.brandName) device.brandName = String(validated.brandName).toLowerCase();
     if (validated.interval != null) device.interval = validated.interval;
-    if (validated.energyMonitoringIncluded != null) {
+    if (typeof validated.energyMonitoringIncluded === "boolean") {
         device.energyMonitoringIncluded = validated.energyMonitoringIncluded;
+    }
+
+    const nextCategory = validated.category || device.category;
+    if (nextCategory === "trigger" || device.category === "trigger") {
+        for (const k of alertKeys) {
+            if (typeof validated[k] === "boolean") device[k] = validated[k];
+        }
+    }
+
+    const nextType = validated.deviceType || device.deviceType;
+    if (nextType === "AC") {
+        if (validated.brandName) {
+            const { getBrandByName } = require("../services/ackitBrandService");
+            const acBrand = await getBrandByName(validated.brandName);
+            if (!acBrand) {
+                return {
+                    error: "Selected AC brand not found on Ackit.",
+                    needsFields: [{ field: "brandName", message: "Valid Ackit brand" }],
+                };
+            }
+            device.brandName = String(acBrand.brandName).toLowerCase();
+        } else if (!device.brandName) {
+            return {
+                error: "brandName is required for AC devices.",
+                needsFields: [{ field: "brandName", message: "Required for AC" }],
+            };
+        }
+        device.conditions = [];
+    } else if (nextType === "WLD") {
+        device.conditions = [];
+        if (validated.category && validated.category !== "monitoring") {
+            return {
+                error: "Water Leakage Device (WLD) supports monitoring category only.",
+            };
+        }
+        device.category = "monitoring";
+    } else if (validated.deviceType && validated.deviceType !== "AC") {
+        device.brandName = null;
     }
 
     await device.save();
     return {
         success: true,
-        message: "Device updated.",
+        message: "Device updated (same capabilities as Edit Device UI).",
         device: {
             id: String(device._id),
             deviceId: device.deviceId,
             deviceName: device.deviceName,
             deviceType: device.deviceType,
             category: device.category,
+            venueId: String(device.venue),
+            brandName: device.brandName || null,
         },
+        instructionForAssistant:
+            "Confirm the update. Device venue move, rename, type/category/conditions/alerts are supported — do not invent limits.",
     };
 }
 
@@ -1186,15 +1395,32 @@ async function updateTeamMember(user, args = {}) {
 
     let changed = false;
 
-    if (args.organizations || args.organizationId || args.organizationName) {
+    // Multi-org by id array or names (Edit User = multi-select orgs)
+    if (
+        args.organizations ||
+        args.organizationNames ||
+        args.organizationId ||
+        args.organizationName
+    ) {
         let orgIds = Array.isArray(args.organizations)
             ? args.organizations.map(String)
             : [];
+
+        if (Array.isArray(args.organizationNames) && args.organizationNames.length) {
+            for (const n of args.organizationNames) {
+                const r = await resolveOrganization(user, { organizationName: n });
+                if (r.error) return r;
+                orgIds.push(String(r.org._id));
+            }
+        }
+
         if (!orgIds.length) {
             const r = await resolveOrganization(user, args);
             if (r.error) return r;
             orgIds = [String(r.org._id)];
         }
+
+        orgIds = [...new Set(orgIds)];
         const validOrganizations = await Organization.find({
             _id: { $in: orgIds },
             owner: user._id,
@@ -1204,11 +1430,35 @@ async function updateTeamMember(user, args = {}) {
         }
         member.organizations = orgIds;
         changed = true;
+
+        // Like UI: when orgs change, drop venues that no longer belong
+        if (!args.venues && !args.venueId && !args.venueName && !args.venueNames) {
+            const stillValid = await Venue.find({
+                _id: { $in: (member.venues || []).map((v) => v.venueId) },
+                organization: { $in: orgIds },
+            });
+            member.venues = stillValid.map((v) => ({
+                venueId: v._id,
+                venueName: v.name,
+            }));
+        }
     }
 
-    if (args.venues || args.venueId || args.venueName) {
+    if (args.venues || args.venueId || args.venueName || args.venueNames) {
         let venueIds = Array.isArray(args.venues) ? args.venues.map(String) : [];
         if (args.venueId) venueIds.push(String(args.venueId));
+
+        if (Array.isArray(args.venueNames) && args.venueNames.length) {
+            for (const n of args.venueNames) {
+                const vr = await resolveVenue(user, {
+                    venueName: n,
+                    organizationId: String(member.organizations?.[0] || ""),
+                });
+                if (vr.error) return vr;
+                venueIds.push(String(vr.venue._id));
+            }
+        }
+
         if (args.venueName && !venueIds.length) {
             const vr = await resolveVenue(user, {
                 venueName: args.venueName,
@@ -1217,12 +1467,17 @@ async function updateTeamMember(user, args = {}) {
             if (vr.error) return vr;
             venueIds = [String(vr.venue._id)];
         }
+
+        venueIds = [...new Set(venueIds)];
         const validVenues = await Venue.find({
             _id: { $in: venueIds },
             organization: { $in: member.organizations },
         });
         if (validVenues.length !== venueIds.length) {
-            return { error: "One or more venues are invalid for this user's organizations." };
+            return {
+                error:
+                    "One or more venues are invalid for this user's organizations.",
+            };
         }
         member.venues = validVenues.map((v) => ({
             venueId: v._id,
@@ -1241,26 +1496,34 @@ async function updateTeamMember(user, args = {}) {
 
     if (!changed) {
         return {
-            error: "Provide organizations, venues, and/or permission to update.",
+            error:
+                "Provide permission and/or organizations and/or venues (same as Edit User UI).",
             needsFields: [
                 { field: "permission", message: "view | manage" },
-                { field: "organizationName", message: "optional reassignment" },
+                {
+                    field: "organizationNames",
+                    message: "Reassign one or more organizations by name",
+                },
+                { field: "venueNames", message: "Assign venues by name" },
             ],
-            instructionForAssistant: "Ask what to change for this user.",
+            instructionForAssistant:
+                "Edit User supports permission, organizations, and venues — ask what to change, then retry. Name/email of the user are identity only (not editable here).",
         };
     }
 
     await member.save();
     return {
         success: true,
-        message: "Team user updated.",
+        message: "Team user updated (same fields as Edit User UI).",
         user: {
             id: String(member._id),
             name: member.name,
             email: member.email,
             permission: member.permission,
             organizations: member.organizations.map(String),
-            venues: (member.venues || []).map((v) => v.venueName || String(v.venueId)),
+            venues: (member.venues || []).map(
+                (v) => v.venueName || String(v.venueId)
+            ),
         },
     };
 }
@@ -1332,7 +1595,7 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "updateOrganization",
             description:
-                "RENAME an organization you own. Prefer organizationId; organizationName ok if unique. Pass newName.",
+                "Edit Organization UI: RENAME only (newName). No other org fields exist in the UI.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1440,7 +1703,7 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "createDevice",
             description:
-                "CREATE a device. Required: deviceName, deviceType (OD|THD|AQID|GLD|ED|AC|SMD|WLD), category (monitoring|scheduling|trigger), venueId or venueName. AC needs brandName. Sensor types need conditions[{type,operator,value}]. Trigger needs at least one *AlertAccess boolean.",
+                "Add Device UI: create device. Required: deviceName, deviceType (OD|THD|AQID|GLD|ED|AC|SMD|WLD), category (monitoring|scheduling|trigger), venueName or venueId. AC needs brandName (no conditions). WLD = monitoring only, no conditions. Sensors need conditions[{type,operator,value}] — THD: temp+humidity; OD: +odour; AQID: +AQI; SMD: smoke; GLD: temp+humidity+gass; ED: current required (voltage defaults to 225). Trigger: optional *AlertAccess booleans (defaults false). Never invent unsupported limits.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1450,6 +1713,7 @@ const MUTATION_AGENT_TOOLS = [
                     venueId: { type: "string" },
                     venueName: { type: "string" },
                     organizationId: { type: "string" },
+                    organizationName: { type: "string" },
                     brandName: { type: "string" },
                     conditions: {
                         type: "array",
@@ -1482,21 +1746,37 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "updateDevice",
             description:
-                "UPDATE a device like Edit Device UI: rename (newDeviceName) and/or move to another venue (venueId/venueName). Prefer deviceId. Venue switch IS supported.",
+                "Edit Device UI: rename (newDeviceName), move venue (newVenueName/newVenueId), deviceType, category, conditions, AC brandName, energyMonitoringIncluded, trigger *AlertAccess booleans. Prefer deviceId to identify. Venue move IS supported — never invent limits.",
             parameters: {
                 type: "object",
                 properties: {
                     deviceId: { type: "string" },
-                    deviceName: { type: "string" },
+                    deviceName: {
+                        type: "string",
+                        description: "Identity lookup only — use newDeviceName to rename",
+                    },
                     mongoId: { type: "string" },
                     newDeviceName: { type: "string" },
+                    newVenueId: { type: "string" },
+                    newVenueName: { type: "string" },
                     venueId: { type: "string" },
                     venueName: { type: "string" },
                     organizationId: { type: "string" },
                     category: { type: "string" },
                     deviceType: { type: "string" },
                     brandName: { type: "string" },
+                    energyMonitoringIncluded: { type: "boolean" },
+                    interval: { type: "number" },
                     conditions: { type: "array", items: { type: "object" } },
+                    tempAlertAccess: { type: "boolean" },
+                    humiAlertAccess: { type: "boolean" },
+                    odourAlertAccess: { type: "boolean" },
+                    aqiAlertAccess: { type: "boolean" },
+                    smokeAlertAccess: { type: "boolean" },
+                    waterLeakAlertAccess: { type: "boolean" },
+                    glAlertAccess: { type: "boolean" },
+                    voltageAlertAccess: { type: "boolean" },
+                    currentAlertAccess: { type: "boolean" },
                 },
             },
         },
@@ -1545,7 +1825,7 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "updateTeamMember",
             description:
-                "MANAGER ONLY. Update a sub-user's permission / organizations / venues. Identify by userId, email, or name.",
+                "Edit User UI (manager only): change permission (view|manage), organizations (organizationNames[] or organizations[]), and venues (venueNames[] or venues[]). Identify user by userId/email/name. Does NOT change the person's display name or email.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1556,9 +1836,11 @@ const MUTATION_AGENT_TOOLS = [
                     organizationId: { type: "string" },
                     organizationName: { type: "string" },
                     organizations: { type: "array", items: { type: "string" } },
+                    organizationNames: { type: "array", items: { type: "string" } },
                     venueId: { type: "string" },
                     venueName: { type: "string" },
                     venues: { type: "array", items: { type: "string" } },
+                    venueNames: { type: "array", items: { type: "string" } },
                 },
             },
         },
