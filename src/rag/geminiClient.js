@@ -44,60 +44,6 @@ function resetGeminiClients() {
     liveClient = null;
 }
 
-/**
- * Quota / dead-key errors → try next project key.
- * Do NOT rotate on 400 / 503 / network (same key + backoff is correct).
- */
-function isRotatableGeminiError(err) {
-    const status =
-        err?.status ||
-        err?.statusCode ||
-        err?.code ||
-        err?.error?.code ||
-        err?.response?.status;
-    const msg = String(
-        err?.message ||
-            err?.error?.message ||
-            err?.statusText ||
-            ""
-    ).toLowerCase();
-    const statusStr = String(status || "").toLowerCase();
-
-    if (Number(status) === 429) return true;
-    if (statusStr === "resource_exhausted") return true;
-    if (msg.includes("resource_exhausted")) return true;
-    if (msg.includes("quota") && (msg.includes("exceed") || msg.includes("exhausted")))
-        return true;
-    if (msg.includes("rate limit") || msg.includes("too many requests"))
-        return true;
-
-    if (Number(status) === 403) return true;
-    if (msg.includes("api_key_invalid") || msg.includes("api key not valid"))
-        return true;
-    if (msg.includes("permission_denied") && msg.includes("api key"))
-        return true;
-
-    return false;
-}
-
-/**
- * Advance sticky key index. Returns false if no next key left.
- */
-function rotateToNextGeminiKey(reason = "") {
-    const keys = getGeminiApiKeys();
-    if (keys.length <= 1) return false;
-    if (keyIndex >= keys.length - 1) return false;
-
-    const from = maskKey(keys[keyIndex]);
-    keyIndex += 1;
-    const to = maskKey(keys[keyIndex]);
-    resetGeminiClients();
-    console.warn(
-        `[gemini] rotating API key ${from} → ${to} (${keyIndex + 1}/${keys.length})${reason ? ` reason=${reason}` : ""}`
-    );
-    return true;
-}
-
 function getGeminiClient() {
     const key = getGeminiApiKey();
     if (!key) {
@@ -129,8 +75,75 @@ function getGeminiLiveClient() {
 }
 
 /**
- * Run `fn(ai)` with automatic key rotation on quota / invalid-key errors.
- * Stays on the working key afterwards (sticky).
+ * Quota / dead-key / overload → try next project key.
+ * Do NOT rotate on generic 400 INVALID_ARGUMENT (fix payload / context instead).
+ */
+function isRotatableGeminiError(err) {
+    const status =
+        err?.status ||
+        err?.statusCode ||
+        err?.code ||
+        err?.error?.code ||
+        err?.response?.status;
+    const msg = String(
+        err?.message ||
+            err?.error?.message ||
+            err?.statusText ||
+            ""
+    ).toLowerCase();
+    const statusStr = String(status || "").toLowerCase();
+
+    if (Number(status) === 429) return true;
+    if (Number(status) === 503) return true; // model overloaded — other keys often work
+    if (statusStr === "resource_exhausted" || statusStr === "unavailable")
+        return true;
+    if (msg.includes("resource_exhausted") || msg.includes("unavailable"))
+        return true;
+    if (msg.includes("quota") && (msg.includes("exceed") || msg.includes("exhausted")))
+        return true;
+    if (msg.includes("rate limit") || msg.includes("too many requests"))
+        return true;
+    if (msg.includes("overloaded")) return true;
+
+    if (Number(status) === 403) return true;
+    if (msg.includes("api_key_invalid") || msg.includes("api key not valid"))
+        return true;
+    if (msg.includes("permission_denied") && msg.includes("api key"))
+        return true;
+
+    // Dead / disabled Google Cloud key — skip and try next in the pool
+    if (Number(status) === 401) return true;
+    if (statusStr === "unauthenticated") return true;
+    if (msg.includes("account_state_invalid")) return true;
+    if (msg.includes("bound service account")) return true;
+    if (msg.includes("api key") && (msg.includes("deleted") || msg.includes("disabled")))
+        return true;
+
+    return false;
+}
+
+/**
+ * Advance sticky key index (wraps so the full pool can be retried).
+ * Returns false only when there is a single key (nowhere to rotate).
+ */
+function rotateToNextGeminiKey(reason = "") {
+    const keys = getGeminiApiKeys();
+    if (keys.length <= 1) return false;
+
+    const fromIdx = keyIndex;
+    const from = maskKey(keys[fromIdx]);
+    keyIndex = (keyIndex + 1) % keys.length;
+    const to = maskKey(keys[keyIndex]);
+    resetGeminiClients();
+    console.warn(
+        `[gemini] rotating API key ${from} → ${to} (${keyIndex + 1}/${keys.length})${reason ? ` reason=${reason}` : ""}`
+    );
+    return true;
+}
+
+/**
+ * Run `fn(ai)` with automatic key rotation on quota / invalid-key / overload.
+ * Tries each key in the pool at most once per call (wraps from sticky index).
  */
 async function withGeminiRetry(fn) {
     const keys = getGeminiApiKeys();
@@ -141,15 +154,33 @@ async function withGeminiRetry(fn) {
     }
 
     let lastErr;
-    const maxAttempts = keys.length - keyIndex;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const total = keys.length;
+    for (let attempt = 0; attempt < total; attempt++) {
+        const keyUsed = getGeminiApiKey();
         try {
             return await fn(getGeminiClient());
         } catch (err) {
             lastErr = err;
-            const reason = String(err?.message || err).slice(0, 180);
-            if (!isRotatableGeminiError(err) || !rotateToNextGeminiKey(reason)) {
+            const status =
+                err?.status ||
+                err?.statusCode ||
+                err?.code ||
+                err?.error?.code ||
+                err?.response?.status ||
+                "n/a";
+            const reason = String(
+                err?.message || err?.error?.message || err
+            ).slice(0, 240);
+            console.error(
+                `[gemini] attempt ${attempt + 1}/${total} key=${maskKey(keyUsed)} status=${status} msg=${reason}`
+            );
+
+            if (!isRotatableGeminiError(err)) {
                 throw err;
+            }
+            // Last attempt: do not rotate past the failing key (stay sticky for next request)
+            if (attempt >= total - 1 || !rotateToNextGeminiKey(reason)) {
+                break;
             }
         }
     }
@@ -165,15 +196,32 @@ async function withGeminiLiveRetry(fn) {
     }
 
     let lastErr;
-    const maxAttempts = keys.length - keyIndex;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const total = keys.length;
+    for (let attempt = 0; attempt < total; attempt++) {
+        const keyUsed = getGeminiApiKey();
         try {
             return await fn(getGeminiLiveClient());
         } catch (err) {
             lastErr = err;
-            const reason = String(err?.message || err).slice(0, 180);
-            if (!isRotatableGeminiError(err) || !rotateToNextGeminiKey(reason)) {
+            const status =
+                err?.status ||
+                err?.statusCode ||
+                err?.code ||
+                err?.error?.code ||
+                err?.response?.status ||
+                "n/a";
+            const reason = String(
+                err?.message || err?.error?.message || err
+            ).slice(0, 240);
+            console.error(
+                `[gemini:live] attempt ${attempt + 1}/${total} key=${maskKey(keyUsed)} status=${status} msg=${reason}`
+            );
+
+            if (!isRotatableGeminiError(err)) {
                 throw err;
+            }
+            if (attempt >= total - 1 || !rotateToNextGeminiKey(reason)) {
+                break;
             }
         }
     }

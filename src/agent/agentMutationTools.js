@@ -25,6 +25,23 @@ function isObjectId(id) {
     return mongoose.Types.ObjectId.isValid(String(id || ""));
 }
 
+/** Always return a plain id string — never String(populated Mongoose doc). */
+function toIdString(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.startsWith("{") || trimmed.includes("ObjectId(")) return null;
+        return trimmed;
+    }
+    if (typeof value === "object") {
+        if (value._id != null) return String(value._id);
+        if (value.id != null) return String(value.id);
+    }
+    const asString = String(value);
+    if (asString.startsWith("{") || asString.includes("ObjectId(")) return null;
+    return asString;
+}
+
 function zodError(err) {
     if (err?.name !== "ZodError") return null;
     return {
@@ -76,6 +93,27 @@ function needsConfirm(preview) {
 
 function escapeRegex(s) {
     return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Gemini sometimes doubles string args named "name" (e.g. ORG003 → ORG003ORG003).
+ * If the whole string is an exact repeat of its first half, keep one copy.
+ */
+function collapseExactDuplicateName(raw) {
+    const str = String(raw ?? "").trim();
+    if (str.length < 6 || str.length % 2 !== 0) return str;
+    const half = str.length / 2;
+    const a = str.slice(0, half);
+    const b = str.slice(half);
+    if (a && a === b) return a;
+    return str;
+}
+
+/** Prefer organizationName; fall back to name. Always collapse Gemini double-name bug. */
+function readOrgCreateName(args = {}) {
+    return collapseExactDuplicateName(
+        args.organizationName ?? args.name ?? ""
+    );
 }
 
 async function resolveBillingUser(user) {
@@ -135,7 +173,7 @@ async function assertPlanAllows(user, resourceType) {
             creatorId: ownerId,
             role: "user",
         });
-        max = plan.maxUsers || 10;
+        max = plan.maxUsers;
     }
 
     if (used >= max) {
@@ -242,12 +280,18 @@ async function createOrganization(user, args = {}) {
     const denied = denyMutate(user);
     if (denied) return denied;
 
-    const name = String(args.name || "").trim();
+    const name = readOrgCreateName(args);
     if (!name) {
         return {
             error: "Organization name is required.",
-            needsFields: [{ field: "name", message: "At least 3 characters" }],
-            instructionForAssistant: "Ask the user for the organization name, then retry.",
+            needsFields: [
+                {
+                    field: "organizationName",
+                    message: "At least 3 characters — pass the name exactly once",
+                },
+            ],
+            instructionForAssistant:
+                "Ask for the organization name once, then call createOrganization with organizationName set to that exact string (do not concatenate or repeat it).",
         };
     }
 
@@ -383,18 +427,18 @@ async function createVenue(user, args = {}) {
     const denied = denyMutate(user);
     if (denied) return denied;
 
-    const name = String(args.name || "").trim();
+    const name = collapseExactDuplicateName(args.venueName ?? args.name ?? "");
     const resolved = await resolveOrganization(user, args);
     if (resolved.error) {
         if (!name) {
             return {
                 error: "Venue name and organization are required.",
                 needsFields: [
-                    { field: "name", message: "Venue name" },
+                    { field: "venueName", message: "Venue name" },
                     { field: "organizationName", message: "Which organization" },
                 ],
                 instructionForAssistant:
-                    "Ask for venue name and which organization it belongs to.",
+                    "Ask for venue name and which organization it belongs to. Pass each name exactly once.",
             };
         }
         return resolved;
@@ -402,8 +446,9 @@ async function createVenue(user, args = {}) {
     if (!name) {
         return {
             error: "Venue name is required.",
-            needsFields: [{ field: "name", message: "Required" }],
-            instructionForAssistant: "Ask for the venue name.",
+            needsFields: [{ field: "venueName", message: "Required" }],
+            instructionForAssistant:
+                "Ask for the venue name once (do not repeat/concatenate it).",
         };
     }
 
@@ -592,17 +637,26 @@ async function updateVenue(user, args = {}) {
     if (targetOrg) venue.organization = targetOrg._id;
     await venue.save();
 
+    const previousOrganizationId = String(currentOrg._id);
+    const moved = Boolean(
+        targetOrg && String(targetOrg._id) !== previousOrganizationId
+    );
+
     return {
         success: true,
-        message: targetOrg
+        message: moved
             ? "Venue updated (including organization move)."
             : "Venue updated.",
         venue: {
             id: String(venue._id),
             name: venue.name,
-            organizationId: String(venue.organization),
+            organizationId: String(finalOrgId),
             organizationName: targetOrg ? targetOrg.name : currentOrg.name,
-            movedOrganization: Boolean(targetOrg),
+            movedOrganization: moved,
+            // Frontend must refetch BOTH orgs (same as Edit Venue UI)
+            ...(moved
+                ? { previousOrganizationId }
+                : {}),
         },
         instructionForAssistant:
             "Confirm the change to the user. Organization switch IS supported — same as Edit Venue in the UI.",
@@ -774,7 +828,8 @@ async function createDevice(user, args = {}) {
     const category = args.category ? String(args.category).toLowerCase() : "";
 
     const missing = [];
-    if (!args.deviceName) missing.push({ field: "deviceName", message: "Required" });
+    const deviceName = collapseExactDuplicateName(args.deviceName || "");
+    if (!deviceName) missing.push({ field: "deviceName", message: "Required" });
     if (!deviceType) {
         missing.push({
             field: "deviceType",
@@ -840,7 +895,7 @@ async function createDevice(user, args = {}) {
         category === "trigger" ? applyTriggerAlertDefaults(deviceType, args) : {};
 
     const body = {
-        deviceName: String(args.deviceName).trim(),
+        deviceName,
         venueId: String(venue._id),
         deviceType,
         category,
@@ -978,6 +1033,12 @@ async function updateDevice(user, args = {}) {
         return { error: "You do not have access to update this device." };
     }
 
+    // Capture BEFORE mutating venue (needed for UI refresh of old list)
+    const previousVenueId = toIdString(device.venue?._id || device.venue);
+    const previousOrganizationId = toIdString(
+        org?._id || venue.organization?._id || venue.organization
+    );
+
     // Build patch — same fields as Edit Device modal
     const patch = {};
     // Rename only via newDeviceName (deviceName is identity when finding)
@@ -1114,17 +1175,45 @@ async function updateDevice(user, args = {}) {
     }
 
     await device.save();
+
+    const newVenueId = toIdString(device.venue?._id || device.venue);
+    const movedVenue =
+        Boolean(validated.venueId) &&
+        previousVenueId &&
+        newVenueId &&
+        previousVenueId !== newVenueId;
+
+    let newOrganizationId = previousOrganizationId;
+    if (movedVenue && validated.venueId) {
+        const movedToVenue = await Venue.findById(validated.venueId).select(
+            "organization"
+        );
+        newOrganizationId = toIdString(
+            movedToVenue?.organization?._id || movedToVenue?.organization
+        );
+    }
+
     return {
         success: true,
-        message: "Device updated (same capabilities as Edit Device UI).",
+        message: movedVenue
+            ? "Device updated (including venue / organization move)."
+            : "Device updated (same capabilities as Edit Device UI).",
         device: {
             id: String(device._id),
             deviceId: device.deviceId,
             deviceName: device.deviceName,
             deviceType: device.deviceType,
             category: device.category,
-            venueId: String(device.venue),
+            venueId: newVenueId,
             brandName: device.brandName || null,
+            movedVenue,
+            ...(movedVenue
+                ? {
+                      previousVenueId,
+                      previousOrganizationId,
+                      organizationId: newOrganizationId,
+                  }
+                : {}),
         },
         instructionForAssistant:
             "Confirm the update. Device venue move, rename, type/category/conditions/alerts are supported — do not invent limits.",
@@ -1187,6 +1276,7 @@ async function deleteDevice(user, args = {}) {
         deleted: {
             deviceId: device.deviceId,
             deviceName: device.deviceName,
+            venueId: toIdString(device.venue?._id || device.venue),
         },
     };
 }
@@ -1280,7 +1370,7 @@ async function createTeamMember(user, args = {}) {
     let validated;
     try {
         validated = createSubUserSchema.parse({
-            name: String(args.name).trim(),
+            name: collapseExactDuplicateName(args.name),
             email: String(args.email).toLowerCase().trim(),
             role: "user",
             organizations: orgIds,
@@ -1561,6 +1651,140 @@ async function deleteTeamMember(user, args = {}) {
     };
 }
 
+/** Redux scopes the frontend should refetch after a successful agent write. */
+const MUTATION_TOOL_REFRESH_SCOPES = {
+    createOrganization: ["organizations"],
+    updateOrganization: ["organizations"],
+    deleteOrganization: ["organizations", "venues", "devices"],
+    createVenue: ["organizations", "venues"],
+    updateVenue: ["organizations", "venues"],
+    deleteVenue: ["venues", "devices"],
+    createDevice: ["devices", "venues"],
+    updateDevice: ["devices", "venues"],
+    deleteDevice: ["devices"],
+    createTeamMember: ["users"],
+    updateTeamMember: ["users"],
+    deleteTeamMember: ["users"],
+};
+
+function mutationSucceeded(toolResult) {
+    return (
+        toolResult &&
+        typeof toolResult === "object" &&
+        toolResult.success === true &&
+        !toolResult.error &&
+        !toolResult.needsFields &&
+        !toolResult.needsConfirmation
+    );
+}
+
+function extractMutationRefreshHints(toolName, toolResult) {
+    const hints = {};
+    if (!mutationSucceeded(toolResult)) return hints;
+
+    const organizationIds = [];
+    const pushOrgId = (raw) => {
+        const id = toIdString(raw);
+        if (id && !organizationIds.includes(id)) organizationIds.push(id);
+    };
+
+    pushOrgId(toolResult.organization?.id);
+    pushOrgId(toolResult.venue?.organizationId);
+    pushOrgId(toolResult.venue?.previousOrganizationId);
+    pushOrgId(toolResult.device?.organizationId);
+    pushOrgId(toolResult.device?.previousOrganizationId);
+    pushOrgId(toolResult.deleted?.organizationId);
+
+    if (organizationIds.length) {
+        hints.organizationId = organizationIds[0];
+        hints.organizationIds = organizationIds;
+    }
+
+    const venueIds = [];
+    const pushVenueId = (raw) => {
+        const id = toIdString(raw);
+        if (id && !venueIds.includes(id)) venueIds.push(id);
+    };
+
+    pushVenueId(toolResult.venue?.id);
+    pushVenueId(toolResult.device?.venueId);
+    pushVenueId(toolResult.device?.previousVenueId);
+    pushVenueId(toolResult.deleted?.venueId);
+
+    if (venueIds.length) {
+        hints.venueId = venueIds[0];
+        hints.venueIds = venueIds;
+        if (toolResult.device?.previousVenueId) {
+            hints.previousVenueId = toIdString(
+                toolResult.device.previousVenueId
+            );
+        }
+    }
+
+    return hints;
+}
+
+function getMutationRefreshScopes(toolName, toolResult) {
+    if (!mutationSucceeded(toolResult)) return [];
+    return MUTATION_TOOL_REFRESH_SCOPES[toolName] || [];
+}
+
+function createMutationRefreshTracker() {
+    return { scopes: new Set(), hints: {} };
+}
+
+function trackMutationRefresh(tracker, toolName, toolResult) {
+    if (!tracker) return;
+    for (const scope of getMutationRefreshScopes(toolName, toolResult)) {
+        tracker.scopes.add(scope);
+    }
+    const next = extractMutationRefreshHints(toolName, toolResult);
+
+    const prevOrgIds = Array.isArray(tracker.hints.organizationIds)
+        ? tracker.hints.organizationIds
+        : [];
+    const nextOrgIds = Array.isArray(next.organizationIds)
+        ? next.organizationIds
+        : [];
+    const mergedOrgIds = [
+        ...new Set([...prevOrgIds, ...nextOrgIds].filter(Boolean)),
+    ];
+
+    const prevVenueIds = Array.isArray(tracker.hints.venueIds)
+        ? tracker.hints.venueIds
+        : [];
+    const nextVenueIds = Array.isArray(next.venueIds) ? next.venueIds : [];
+    const mergedVenueIds = [
+        ...new Set([...prevVenueIds, ...nextVenueIds].filter(Boolean)),
+    ];
+
+    Object.assign(tracker.hints, next);
+    if (mergedOrgIds.length) {
+        tracker.hints.organizationIds = mergedOrgIds;
+        if (!tracker.hints.organizationId) {
+            tracker.hints.organizationId = mergedOrgIds[0];
+        }
+    }
+    if (mergedVenueIds.length) {
+        tracker.hints.venueIds = mergedVenueIds;
+        if (!tracker.hints.venueId) {
+            tracker.hints.venueId = mergedVenueIds[0];
+        }
+    }
+}
+
+function buildMutationRefreshEvent(tracker) {
+    if (!tracker?.scopes?.size) return null;
+    const event = {
+        type: "refresh",
+        scopes: [...tracker.scopes],
+    };
+    if (Object.keys(tracker.hints).length) {
+        event.hints = { ...tracker.hints };
+    }
+    return event;
+}
+
 const MUTATION_TOOL_IMPL = {
     createOrganization,
     updateOrganization,
@@ -1582,11 +1806,21 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "createOrganization",
             description:
-                "CREATE an organization for the logged-in manager/manage-user. Ask for name if missing. Checks plan limits.",
+                "CREATE an organization. Pass organizationName EXACTLY once as the user said it (e.g. ORG003 → organizationName \"ORG003\"). Never concatenate or double the name.",
             parameters: {
                 type: "object",
-                properties: { name: { type: "string" } },
-                required: ["name"],
+                properties: {
+                    organizationName: {
+                        type: "string",
+                        description:
+                            "Exact org name from the user, once only (min 3 chars)",
+                    },
+                    name: {
+                        type: "string",
+                        description: "Deprecated alias for organizationName",
+                    },
+                },
+                required: ["organizationName"],
             },
         },
     },
@@ -1628,11 +1862,18 @@ const MUTATION_AGENT_TOOLS = [
         function: {
             name: "createVenue",
             description:
-                "CREATE a venue. Need name + organizationId or organizationName. Optional description.",
+                "CREATE a venue. Need venueName (exactly once) + organizationId or organizationName. Optional description.",
             parameters: {
                 type: "object",
                 properties: {
-                    name: { type: "string" },
+                    venueName: {
+                        type: "string",
+                        description: "Exact venue name once only",
+                    },
+                    name: {
+                        type: "string",
+                        description: "Deprecated alias for venueName",
+                    },
                     organizationId: { type: "string" },
                     organizationName: { type: "string" },
                     description: { type: "string" },
@@ -1867,4 +2108,9 @@ const MUTATION_AGENT_TOOLS = [
 module.exports = {
     MUTATION_TOOL_IMPL,
     MUTATION_AGENT_TOOLS,
+    createMutationRefreshTracker,
+    trackMutationRefresh,
+    buildMutationRefreshEvent,
+    getMutationRefreshScopes,
+    extractMutationRefreshHints,
 };

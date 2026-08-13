@@ -6,6 +6,10 @@ const {
     executeRealtimeTool,
     formatVoiceAnswerForChat,
 } = require("../agent/realtimeService");
+const {
+    getMutationRefreshScopes,
+    extractMutationRefreshHints,
+} = require("../agent/agentMutationTools");
 
 const FRIENDLY_UNAVAILABLE =
     "Currently the service is unavailable. Sorry for the inconvenience — please try again.";
@@ -153,7 +157,17 @@ async function helpRealtimeTool(req, res) {
         const name = req.body?.name;
         const args = req.body?.arguments ?? req.body?.args ?? {};
         const result = await executeRealtimeTool(req.user, name, args);
-        return res.status(200).json({ success: true, result });
+        const refreshScopes = getMutationRefreshScopes(name, result);
+        const hints =
+            refreshScopes.length > 0
+                ? extractMutationRefreshHints(name, result)
+                : undefined;
+        return res.status(200).json({
+            success: true,
+            result,
+            ...(refreshScopes.length ? { refreshScopes } : {}),
+            ...(hints && Object.keys(hints).length ? { refreshHints: hints } : {}),
+        });
     } catch (err) {
         console.error("[help/realtime/tool]", err.message || err);
         return res.status(err.statusCode || 500).json({

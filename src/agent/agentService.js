@@ -9,6 +9,11 @@ const {
 } = require("../rag/geminiClient");
 const { runAgentTool, AGENT_TOOLS } = require("./agentTools");
 const {
+    createMutationRefreshTracker,
+    trackMutationRefresh,
+    buildMutationRefreshEvent,
+} = require("./agentMutationTools");
+const {
     toGeminiFunctionDeclarations,
     toGeminiHistory,
     extractFunctionCalls,
@@ -80,6 +85,7 @@ Your job:
 8) Clean Markdown lists; numbered lists must be 1. 2. 3. continuous.
 9) If a path is not in docs/prompt for THIS role: say it is not available for them — do not invent.
 - When performing writes: collect required info, call tool, report success/failure clearly.
+- Create names CRITICAL: pass organizationName / venueName / deviceName EXACTLY as the user typed, ONCE. Never concatenate (ORG003 must stay ORG003, not ORG003ORG003).
 - Edit Venue supports moving a venue to another organization (newOrganizationName) — NEVER say venues cannot change organization.
 - Edit Device supports rename, venue move, type/category/conditions/AC brand/trigger alerts — NEVER invent limitations that contradict the write tools.
 - Edit Organization is rename-only. Edit User is permission + orgs + venues (not name/email).
@@ -166,35 +172,57 @@ function parseToolArgs(raw) {
     }
 }
 
+/** Keep chat history small — long device-create replies blow Gemini context. */
+function sanitizeAgentHistory(history = []) {
+    return (Array.isArray(history) ? history : [])
+        .slice(-6)
+        .map((m) => ({
+            role: m.role === "bot" || m.role === "assistant" ? "bot" : "user",
+            text: String(m.text || "").slice(0, 1200),
+        }));
+}
+
 async function* agentChatStreamGemini({ user, message, history = [] }) {
     const model = getGeminiChatModelName();
     const systemInstruction = `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`;
     const functionDeclarations = toGeminiFunctionDeclarations(AGENT_TOOLS);
 
     const contents = [
-        ...toGeminiHistory(history),
+        ...toGeminiHistory(sanitizeAgentHistory(history)),
         { role: "user", parts: [{ text: String(message).trim() }] },
     ];
 
-    const maxRounds = 6;
+    const maxRounds = 10;
     let finalText = "";
+    const refreshTracker = createMutationRefreshTracker();
 
     for (let round = 0; round < maxRounds; round++) {
-        const response = await withGeminiRetry((ai) =>
-            ai.models.generateContent({
-                model,
-                contents,
-                config: {
-                    systemInstruction,
-                    temperature: 0.2,
-                    tools: [{ functionDeclarations }],
-                    automaticFunctionCalling: { disable: true },
-                },
-            })
-        );
+        let response;
+        try {
+            response = await withGeminiRetry((ai) =>
+                ai.models.generateContent({
+                    model,
+                    contents,
+                    config: {
+                        systemInstruction,
+                        temperature: 0.2,
+                        tools: [{ functionDeclarations }],
+                        automaticFunctionCalling: { disable: true },
+                    },
+                })
+            );
+        } catch (err) {
+            console.error(
+                `[agent:gemini] generateContent failed round=${round + 1}/${maxRounds} msg=${String(err?.message || err).slice(0, 300)}`
+            );
+            throw err;
+        }
 
         const calls = extractFunctionCalls(response);
         if (calls?.length) {
+            console.log(
+                `[agent:gemini] round=${round + 1} toolCalls=${calls.map((c) => c.name).join(",")}`
+            );
             const modelContent = response.candidates?.[0]?.content;
             if (modelContent?.parts?.length) {
                 contents.push(modelContent);
@@ -219,6 +247,7 @@ async function* agentChatStreamGemini({ user, message, history = [] }) {
                     `[agent:gemini] tool=${name} user=${user.email || user._id} role=${user.role} args=${JSON.stringify(args)}`
                 );
                 const toolResult = await runAgentTool(user, name, args);
+                trackMutationRefresh(refreshTracker, name, toolResult);
                 const part = {
                     functionResponse: {
                         name,
@@ -247,6 +276,8 @@ async function* agentChatStreamGemini({ user, message, history = [] }) {
     for await (const ev of softStreamText(finalText)) {
         yield ev;
     }
+    const refreshEvent = buildMutationRefreshEvent(refreshTracker);
+    if (refreshEvent) yield refreshEvent;
     yield { type: "done" };
 }
 
@@ -259,12 +290,13 @@ async function* agentChatStreamOpenAI({ user, message, history = [] }) {
             role: "system",
             content: `${SYSTEM_INSTRUCTION}\n${buildLoggedInUserContext(user)}`,
         },
-        ...toOpenAIHistory(history),
+        ...toOpenAIHistory(sanitizeAgentHistory(history)),
         { role: "user", content: String(message).trim() },
     ];
 
-    const maxRounds = 6;
+    const maxRounds = 10;
     let finalText = "";
+    const refreshTracker = createMutationRefreshTracker();
 
     for (let round = 0; round < maxRounds; round++) {
         const completion = await openai.chat.completions.create({
@@ -294,6 +326,7 @@ async function* agentChatStreamOpenAI({ user, message, history = [] }) {
                     `[agent] tool=${name} user=${user.email || user._id} role=${user.role} args=${JSON.stringify(args)}`
                 );
                 const toolResult = await runAgentTool(user, name, args);
+                trackMutationRefresh(refreshTracker, name, toolResult);
                 messages.push({
                     role: "tool",
                     tool_call_id: call.id,
@@ -315,12 +348,14 @@ async function* agentChatStreamOpenAI({ user, message, history = [] }) {
     for await (const ev of softStreamText(finalText)) {
         yield ev;
     }
+    const refreshEvent = buildMutationRefreshEvent(refreshTracker);
+    if (refreshEvent) yield refreshEvent;
     yield { type: "done" };
 }
 
 /**
  * Personal data agent with function calling (Gemini text by default when configured).
- * Yields: { type:'token', text } | { type:'done' } | { type:'error', message }
+ * Yields: { type:'token', text } | { type:'refresh', scopes } | { type:'done' } | { type:'error', message }
  */
 async function* agentChatStream({ user, message, history = [] }) {
     const q = String(message || "").trim();

@@ -369,14 +369,12 @@ const getDevicesByVenue = async (req, res) => {
 
         const devices = await Device.find({ venue: venueId })
             .populate("venue", "name");
-        if (devices.length === 0) {
-            return res.status(404).json({ message: "No devices under this venue" });
-        }
 
+        // Empty list is success — NOT 404 (same fix as venues-by-org)
         return res.status(200).json({
             success: true,
             count: devices.length,
-            devices
+            devices,
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Server error" });

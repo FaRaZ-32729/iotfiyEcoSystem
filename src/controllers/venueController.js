@@ -116,14 +116,12 @@ const getVenuesByOrganization = async (req, res) => {
         const venues = await Venue.find({ organization: organizationId })
             .populate("organization", "name");
 
-        if (venues.length === 0) {
-            return res.status(404).json({ message: "No venue found under this organization" })
-        }
-
+        // Empty list is success — NOT 404. Returning 404 made Redux set a global
+        // error that hid other orgs' venue lists after an agent/manual org-move.
         return res.status(200).json({
             success: true,
             count: venues.length,
-            venues
+            venues,
         });
     } catch (error) {
         res.status(500).json({ success: false, message: "Server error" });
