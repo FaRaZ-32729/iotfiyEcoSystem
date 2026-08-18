@@ -14,6 +14,14 @@ const {
 const FRIENDLY_UNAVAILABLE =
     "Currently the service is unavailable. Sorry for the inconvenience — please try again.";
 
+function attachClientTimezone(user, body = {}) {
+    if (!user || typeof user !== "object") return user;
+    const offset = Number(body.timezoneOffsetMinutes);
+    user.clientTimezoneOffsetMinutes = Number.isFinite(offset) ? offset : null;
+    user.clientTimeZone = String(body.timeZone || "").trim() || null;
+    return user;
+}
+
 /**
  * POST /api/help/chat
  * Body: { message, history?, mode?: 'docs'|'agent' }
@@ -25,7 +33,11 @@ async function helpChat(req, res) {
         const result =
             mode === "docs"
                 ? await chat({ message, history })
-                : await agentChat({ user: req.user, message, history });
+                : await agentChat({
+                      user: attachClientTimezone(req.user, req.body),
+                      message,
+                      history,
+                  });
         return res.status(200).json({
             success: true,
             answer: result.answer,
@@ -62,7 +74,11 @@ async function helpChatStream(req, res) {
     const stream =
         mode === "docs"
             ? require("../rag/ragService").chatStream({ message, history })
-            : agentChatStream({ user: req.user, message, history });
+            : agentChatStream({
+                  user: attachClientTimezone(req.user, req.body),
+                  message,
+                  history,
+              });
 
     try {
         for await (const event of stream) {
@@ -156,7 +172,11 @@ async function helpRealtimeTool(req, res) {
     try {
         const name = req.body?.name;
         const args = req.body?.arguments ?? req.body?.args ?? {};
-        const result = await executeRealtimeTool(req.user, name, args);
+        const result = await executeRealtimeTool(
+            attachClientTimezone(req.user, req.body),
+            name,
+            args
+        );
         const refreshScopes = getMutationRefreshScopes(name, result);
         const hints =
             refreshScopes.length > 0

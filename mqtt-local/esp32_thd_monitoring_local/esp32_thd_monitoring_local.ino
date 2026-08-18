@@ -1,5 +1,5 @@
 Z/*
- * IoTify THD (Temperature + Humidity) — LOCAL monitoring
+ * IOTFIY THD (Temperature + Humidity) — LOCAL monitoring
  *
  * Minimal difference vs Odour sketch:
  *   - No "odour" field in JSON
@@ -173,7 +173,7 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== IoTify THD Monitoring — LOCAL ===");
+  Serial.println("\n=== IOTFIY THD Monitoring — LOCAL ===");
   Serial.println("Keys: t=temp | h=hum | n=normal | s=send");
 
   setupWiFi();

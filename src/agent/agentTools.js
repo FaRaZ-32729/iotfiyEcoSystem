@@ -14,67 +14,10 @@ const {
     MUTATION_TOOL_IMPL,
     MUTATION_AGENT_TOOLS,
 } = require("./agentMutationTools");
+const { computeConnectivity } = require("../utils/deviceConnectivity");
 
 const DEVICE_LIST_SELECT =
     "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert energyMonitoringIncluded";
-
-/**
- * Match Dashboard device-card LED (useDeviceWebSocket):
- * - Card does NOT use MongoDB status alone.
- * - Online when live MQTT status/data arrives over WebSocket.
- * - Backup: if no data for 90s → offline (60s interval + 30s grace).
- * Agent has no live WS, so approximate with lastUpdateTime / lastSeen freshness (same 90s).
- */
-const ONLINE_STALE_MS = 90 * 1000;
-
-function computeConnectivity(d) {
-    const dbStatus = String(d?.status || "offline").toLowerCase();
-    const now = Date.now();
-    const lastSeenMs = d?.lastSeen ? new Date(d.lastSeen).getTime() : 0;
-    const lastUpdateMs = d?.lastUpdateTime
-        ? new Date(d.lastUpdateTime).getTime()
-        : 0;
-    // Prefer sensor/data activity (same idea as WS receivedAt); fall back to status lastSeen.
-    const freshest = Math.max(lastUpdateMs || 0, lastSeenMs || 0);
-    const ageMs = freshest ? now - freshest : null;
-    const recentlyActive =
-        ageMs != null && ageMs >= 0 && ageMs <= ONLINE_STALE_MS;
-
-    // Mirror card: start from "offline unless recently heard" — do not trust sticky DB online.
-    let isOnline = false;
-    let reason = "no_recent_activity";
-
-    if (dbStatus === "offline" && !recentlyActive) {
-        isOnline = false;
-        reason = "db_status_offline";
-    } else if (recentlyActive) {
-        isOnline = true;
-        reason =
-            lastUpdateMs && lastUpdateMs === freshest
-                ? "recent_data_within_90s"
-                : "recent_status_within_90s";
-    } else if (dbStatus === "online") {
-        isOnline = false;
-        reason = "db_online_but_stale_over_90s_like_dashboard";
-    } else {
-        isOnline = false;
-        reason = "offline";
-    }
-
-    return {
-        dbStatus,
-        isOnline,
-        connectivity: isOnline ? "online" : "offline",
-        lastActivityAt: freshest ? new Date(freshest).toISOString() : null,
-        lastActivityAgeSeconds:
-            ageMs != null && ageMs >= 0 ? Math.round(ageMs / 1000) : null,
-        lastActivityAgeMinutes:
-            ageMs != null && ageMs >= 0 ? Math.round(ageMs / 60000) : null,
-        connectivityNote: reason,
-        matchesDashboardCardLogic:
-            "Same 90s presence idea as device-card LED (WS data/status). dbStatus alone can be sticky/wrong.",
-    };
-}
 
 /**
  * Resolve venue ObjectIds this user is allowed to see.
@@ -1723,7 +1666,7 @@ const AGENT_TOOLS = [
         function: {
             name: "getDeviceSnapshot",
             description:
-                "READ-ONLY: Get one device's latest stored live metrics and settings. Prefer deviceId. Includes canHaveSchedules and isOnline (prefer over dbStatus). Does not create or change anything.",
+                "READ-ONLY: Get one device's latest stored live metrics and settings. Prefer deviceId. Includes canHaveSchedules, isOnline (prefer over dbStatus), state ON/OFF, AC setTemperature/acMode/fanSpeed, and alerts.acHealth for AC health (separate from dashboard Alerts panel). Use before setDevicePower/updateAcSettings to confirm online. Does not create or change anything.",
             parameters: {
                 type: "object",
                 properties: {

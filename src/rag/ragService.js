@@ -5,7 +5,6 @@ const {
     getEmbedModelName,
 } = require("./openaiClient");
 const {
-    getGeminiChatModelName,
     getGeminiEmbedModelName,
     useGeminiForText,
     withGeminiRetry,
@@ -62,11 +61,14 @@ async function embedTextOpenAI(text) {
 }
 
 async function embedTextGemini(text) {
-    const result = await withGeminiRetry((ai) =>
-        ai.models.embedContent({
-            model: getGeminiEmbedModelName(),
-            contents: String(text || "").slice(0, 8000),
-        })
+    const embedModel = getGeminiEmbedModelName();
+    const result = await withGeminiRetry(
+        (ai, model) =>
+            ai.models.embedContent({
+                model,
+                contents: String(text || "").slice(0, 8000),
+            }),
+        { models: [embedModel] }
     );
     const values =
         result?.embeddings?.[0]?.values ||
@@ -168,9 +170,9 @@ async function chat({ message, history = [] }) {
 
     let answer;
     if (useGeminiForText()) {
-        const result = await withGeminiRetry((ai) =>
+        const result = await withGeminiRetry((ai, model) =>
             ai.models.generateContent({
-                model: getGeminiChatModelName(),
+                model,
                 contents: prompt,
                 config: { temperature: 0.4 },
             })
@@ -204,9 +206,9 @@ async function* chatStream({ message, history = [] }) {
         const prompt = buildPrompt(q, buildContext(chunks), history);
 
         if (useGeminiForText()) {
-            const stream = await withGeminiRetry((ai) =>
+            const stream = await withGeminiRetry((ai, model) =>
                 ai.models.generateContentStream({
-                    model: getGeminiChatModelName(),
+                    model,
                     contents: prompt,
                     config: { temperature: 0.4 },
                 })

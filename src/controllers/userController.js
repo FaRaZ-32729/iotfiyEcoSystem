@@ -503,7 +503,7 @@ const requestEmailChange = async (req, res) => {
         // Send OTP to NEW email
         await sendEmail(
             newEmail,
-            "Verify Your New Email - IoTify",
+            "Verify Your New Email - IOTFIY",
             `
             <h2>Email Change Request</h2>
             <p>Your OTP to change email is: <strong>${otp}</strong></p>

@@ -170,9 +170,9 @@ const registerUser = async (req, res) => {
         try {
             await sendEmail(
                 user.email,
-                "Verify Your IoTify Account",
+                "Verify Your IOTFIY Account",
                 `
-                <h2>Welcome to IoTify!</h2>
+                <h2>Welcome to IOTFIY!</h2>
                 <p>Hi <strong>${name}</strong>,</p>
                 <p>Your verification OTP is: <strong>${otp}</strong></p>
                 <p>This OTP will expire in 10 minutes.</p>
@@ -275,7 +275,7 @@ const createUserByAdmin = async (req, res) => {
         try {
             await sendEmail(
                 user.email,
-                "Set Your IoTify Account Password",
+                "Set Your IOTFIY Account Password",
                 `
                 <h2>Account Created Successfully</h2>
                 <p>Hello <strong>${name}</strong>,</p>
@@ -552,7 +552,7 @@ const setPassword = async (req, res) => {
         // Send OTP Email
         await sendEmail(
             user.email,
-            "Verify Your IoTify Account",
+            "Verify Your IOTFIY Account",
             `
             <h2>Password Set Successfully!</h2>
             <p>Your account password has been set.</p>
@@ -664,7 +664,7 @@ const resendOTP = async (req, res) => {
         // Send new OTP Email
         await sendEmail(
             user.email,
-            "Your New Verification OTP - IoTify",
+            "Your New Verification OTP - IOTFIY",
             `
             <h2>New Verification OTP</h2>
             <p>Hello ${user.name},</p>
@@ -787,7 +787,7 @@ const forgotPassword = async (req, res) => {
 
         await sendEmail(
             user.email,
-            "Reset Your IoTify Password",
+            "Reset Your IOTFIY Password",
             `
             <h2>Password Reset Request</h2>
             <p>Hello ${user.name},</p>

@@ -104,6 +104,7 @@ function isRotatableGeminiError(err) {
     if (msg.includes("rate limit") || msg.includes("too many requests"))
         return true;
     if (msg.includes("overloaded")) return true;
+    if (msg.includes("high demand")) return true;
 
     if (Number(status) === 403) return true;
     if (msg.includes("api_key_invalid") || msg.includes("api key not valid"))
@@ -120,6 +121,75 @@ function isRotatableGeminiError(err) {
         return true;
 
     return false;
+}
+
+/** 503 / overloaded: same model is busy — try a lighter model, not 18 keys. */
+function isCapacityError(err) {
+    const status =
+        err?.status ||
+        err?.statusCode ||
+        err?.code ||
+        err?.error?.code ||
+        err?.response?.status;
+    const msg = String(
+        err?.message || err?.error?.message || err?.statusText || ""
+    ).toLowerCase();
+    const statusStr = String(status || "").toLowerCase();
+    if (Number(status) === 503) return true;
+    if (statusStr === "unavailable") return true;
+    if (msg.includes("unavailable") || msg.includes("overloaded")) return true;
+    if (msg.includes("high demand")) return true;
+    return false;
+}
+
+/** Per-model quota or a fallback model that this project does not have. */
+function shouldFallbackChatModel(err) {
+    if (isCapacityError(err)) return true;
+    const status =
+        err?.status ||
+        err?.statusCode ||
+        err?.code ||
+        err?.error?.code ||
+        err?.response?.status;
+    const msg = String(
+        err?.message || err?.error?.message || err?.statusText || ""
+    ).toLowerCase();
+    const statusStr = String(status || "").toLowerCase();
+    if (Number(status) === 429) return true;
+    if (statusStr === "resource_exhausted") return true;
+    if (msg.includes("quota") && (msg.includes("exceed") || msg.includes("exhausted")))
+        return true;
+    if (Number(status) === 404) return true;
+    if (msg.includes("model") && (msg.includes("not found") || msg.includes("not supported")))
+        return true;
+    return false;
+}
+
+function getGeminiChatModels() {
+    const fromEnv = String(process.env.GEMINI_CHAT_MODELS || "")
+        .split(/[,\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const primary = (
+        process.env.GEMINI_CHAT_MODEL || "gemini-flash-latest"
+    ).trim();
+    const fallbacks = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
+    ];
+    const ordered = fromEnv.length ? fromEnv : [primary, ...fallbacks];
+    const seen = new Set();
+    return ordered.filter((m) => {
+        if (!m || seen.has(m)) return false;
+        seen.add(m);
+        return true;
+    });
+}
+
+function getGeminiChatModelName() {
+    const models = getGeminiChatModels();
+    return models[0];
 }
 
 /**
@@ -142,10 +212,11 @@ function rotateToNextGeminiKey(reason = "") {
 }
 
 /**
- * Run `fn(ai)` with automatic key rotation on quota / invalid-key / overload.
- * Tries each key in the pool at most once per call (wraps from sticky index).
+ * Run `fn(ai, model)` with key rotation (429/401) and model fallback (503/429).
+ * On high demand or per-model quota: try smaller chat models on the SAME key first.
+ * Embeddings should pass `{ models: [embedModel] }` so chat fallbacks are not used.
  */
-async function withGeminiRetry(fn) {
+async function withGeminiRetry(fn, options = {}) {
     const keys = getGeminiApiKeys();
     if (!keys.length) {
         throw new Error(
@@ -153,35 +224,70 @@ async function withGeminiRetry(fn) {
         );
     }
 
+    const models =
+        Array.isArray(options.models) && options.models.length
+            ? options.models
+            : getGeminiChatModels();
     let lastErr;
-    const total = keys.length;
-    for (let attempt = 0; attempt < total; attempt++) {
-        const keyUsed = getGeminiApiKey();
-        try {
-            return await fn(getGeminiClient());
-        } catch (err) {
-            lastErr = err;
-            const status =
-                err?.status ||
-                err?.statusCode ||
-                err?.code ||
-                err?.error?.code ||
-                err?.response?.status ||
-                "n/a";
-            const reason = String(
-                err?.message || err?.error?.message || err
-            ).slice(0, 240);
-            console.error(
-                `[gemini] attempt ${attempt + 1}/${total} key=${maskKey(keyUsed)} status=${status} msg=${reason}`
-            );
+    let modelIdx = 0;
+    const maxKeyTries = keys.length;
+    const maxKeysOnCapacity = Math.min(2, keys.length);
 
-            if (!isRotatableGeminiError(err)) {
-                throw err;
-            }
-            // Last attempt: do not rotate past the failing key (stay sticky for next request)
-            if (attempt >= total - 1 || !rotateToNextGeminiKey(reason)) {
+    for (let keysTried = 0; keysTried < maxKeyTries; keysTried++) {
+        const keyUsed = getGeminiApiKey();
+        while (modelIdx < models.length) {
+            const model = models[modelIdx];
+            try {
+                const result = await fn(getGeminiClient(), model);
+                if (modelIdx > 0) {
+                    console.warn(`[gemini] using fallback model ${model}`);
+                }
+                return result;
+            } catch (err) {
+                lastErr = err;
+                const status =
+                    err?.status ||
+                    err?.statusCode ||
+                    err?.code ||
+                    err?.error?.code ||
+                    err?.response?.status ||
+                    "n/a";
+                const reason = String(
+                    err?.message || err?.error?.message || err
+                ).slice(0, 240);
+                console.error(
+                    `[gemini] key=${maskKey(keyUsed)} model=${model} status=${status} msg=${reason}`
+                );
+
+                if (!isRotatableGeminiError(err) && !shouldFallbackChatModel(err)) {
+                    throw err;
+                }
+
+                if (shouldFallbackChatModel(err) && modelIdx < models.length - 1) {
+                    const next = models[modelIdx + 1];
+                    console.warn(
+                        `[gemini] rotating model ${model} → ${next} (capacity/quota)`
+                    );
+                    modelIdx += 1;
+                    continue;
+                }
+
                 break;
             }
+        }
+
+        modelIdx = 0;
+        if (
+            isCapacityError(lastErr) &&
+            keysTried + 1 >= maxKeysOnCapacity
+        ) {
+            break;
+        }
+        if (
+            keysTried >= maxKeyTries - 1 ||
+            !rotateToNextGeminiKey(String(lastErr?.message || lastErr).slice(0, 180))
+        ) {
+            break;
         }
     }
     throw lastErr;
@@ -228,9 +334,6 @@ async function withGeminiLiveRetry(fn) {
     throw lastErr;
 }
 
-function getGeminiChatModelName() {
-    return process.env.GEMINI_CHAT_MODEL || "gemini-flash-latest";
-}
 function getGeminiEmbedModelName() {
     return process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
 }
@@ -266,6 +369,7 @@ module.exports = {
     getGeminiApiKey,
     getGeminiApiKeys,
     getGeminiChatModelName,
+    getGeminiChatModels,
     getGeminiEmbedModelName,
     getGeminiLiveModelName,
     useGeminiForText,

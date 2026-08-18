@@ -4,96 +4,141 @@ const Device = require("../models/deviceModel");
 const { generateCron } = require("../queues/cronHelper");
 const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
 
-// ==================== CREATE TRIGGER EVENT ====================
-const createTriggerSchedule = async (req, res) => {
-    try {
-        const { deviceId, startTime, days = [] } = req.body;
-        const user = req.user;
-
-        if (!deviceId || !startTime) {
-            return res.status(400).json({
+/**
+ * Core trigger-event creation — shared by POST /api/trigger/create-event
+ * and Eco createEvent (trigger devices: startTime + days only, no end window).
+ */
+const createTriggerScheduleForDevice = async ({
+    user,
+    deviceId,
+    startTime,
+    days = [],
+}) => {
+    if (!deviceId || !startTime) {
+        return {
+            status: 400,
+            ok: false,
+            schedule: null,
+            device: null,
+            scheduleType: null,
+            body: {
                 success: false,
-                message: "deviceId and startTime are required"
-            });
-        }
+                message: "deviceId and startTime are required",
+            },
+        };
+    }
 
-        const device = await Device.findOne({ deviceId });
-        if (!device || device.category !== "trigger") {
-            return res.status(403).json({
+    const device = await Device.findOne({ deviceId });
+    if (!device || device.category !== "trigger") {
+        return {
+            status: 403,
+            ok: false,
+            schedule: null,
+            device: device || null,
+            scheduleType: null,
+            body: {
                 success: false,
-                message: "Invalid or non-trigger device"
-            });
-        }
+                message: "Invalid or non-trigger device",
+            },
+        };
+    }
 
-        const intervalSeconds = device.interval || 5;
-        const isRecurring = days.length > 0;
+    const intervalSeconds = device.interval || 5;
+    const isRecurring = days.length > 0;
+    const scheduleType = isRecurring ? "recurring" : "one-time";
 
-        let startCron = null;
+    let startCron = null;
 
-        if (isRecurring) {
-            startCron = generateCron(startTime, days);
-            console.log(`🔄 Recurring Trigger Schedule: ${startTime} every ${days.join(', ')}`);
-        } else {
-            console.log(`📅 One-time Trigger Schedule: ${startTime}`);
-        }
+    if (isRecurring) {
+        startCron = generateCron(startTime, days);
+        console.log(`🔄 Recurring Trigger Schedule: ${startTime} every ${days.join(", ")}`);
+    } else {
+        console.log(`📅 One-time Trigger Schedule: ${startTime}`);
+    }
 
-        const schedule = await TriggerSchedule.create({
-            deviceId,
-            startTime,
-            days: isRecurring ? days : [],
-            intervalSeconds,
-            command: "ON",
-            createdBy: user._id,
-            status: "ACTIVE",
-            isRecurring,
-            startCron
-        });
+    const schedule = await TriggerSchedule.create({
+        deviceId,
+        startTime,
+        days: isRecurring ? days : [],
+        intervalSeconds,
+        command: "ON",
+        createdBy: user._id,
+        status: "ACTIVE",
+        isRecurring,
+        startCron,
+    });
 
-        // ==================== ADD ONLY START JOB ====================
-        const startJobId = `trigger-start-${deviceId}-${schedule._id.toString()}`;
+    const startJobId = `trigger-start-${deviceId}-${schedule._id.toString()}`;
 
-        if (isRecurring) {
-            // Recurring → Use Cron
-            await addScheduleJob(startJobId, {
+    if (isRecurring) {
+        await addScheduleJob(
+            startJobId,
+            {
                 deviceId,
                 command: "ON",
                 type: "start",
                 eventId: schedule._id.toString(),
-                isRecurring: true
-            }, startCron);
-        } else {
-            // One-time → Use Delay
-            const now = new Date();
-            const [hour, minute] = startTime.split(":").map(Number);
+                isRecurring: true,
+            },
+            startCron
+        );
+    } else {
+        const now = new Date();
+        const [hour, minute] = startTime.split(":").map(Number);
 
-            const startDate = new Date(Date.UTC(
+        const startDate = new Date(
+            Date.UTC(
                 now.getUTCFullYear(),
                 now.getUTCMonth(),
                 now.getUTCDate(),
                 hour,
                 minute
-            ));
+            )
+        );
 
-            const delayMs = Math.max(0, startDate.getTime() - now.getTime());
+        const delayMs = Math.max(0, startDate.getTime() - now.getTime());
 
-            await addScheduleJob(startJobId, {
+        await addScheduleJob(
+            startJobId,
+            {
                 deviceId,
                 command: "ON",
                 type: "start",
                 eventId: schedule._id.toString(),
-                isRecurring: false
-            }, null, delayMs);   // delayMs = null cron
-        }
+                isRecurring: false,
+            },
+            null,
+            delayMs
+        );
+    }
 
-        res.status(201).json({
+    return {
+        status: 201,
+        ok: true,
+        schedule,
+        device,
+        scheduleType,
+        body: {
             success: true,
             message: `${isRecurring ? "Recurring" : "One-time"} trigger schedule created successfully`,
-            schedule
-        });
+            schedule,
+        },
+    };
+};
 
+const createTriggerSchedule = async (req, res) => {
+    try {
+        const { deviceId, startTime, days = [] } = req.body;
+        const result = await createTriggerScheduleForDevice({
+            user: req.user,
+            deviceId,
+            startTime,
+            days,
+        });
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Create Trigger Schedule Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
@@ -121,14 +166,10 @@ const getTriggerEventsByDeviceID = async (req, res) => {
         const schedules = await TriggerSchedule.find({ deviceId })
             .sort({ createdAt: -1 });
 
-        if (schedules.length === 0) {
-            return res.status(404).json({ message: "no event found" });
-        }
-
         return res.status(200).json({
             success: true,
             count: schedules.length,
-            schedules
+            schedules,
         });
     } catch (error) {
         console.error("Get Trigger Events Error:", error);
@@ -246,64 +287,101 @@ const getCurrentOrNextTriggerEventData = async (deviceId) => {
 };
 
 // ==================== TOGGLE ACTIVE / INACTIVE ====================
+const toggleTriggerEventStatusForEvent = async ({ id, status }) => {
+    if (!["ACTIVE", "INACTIVE"].includes(status)) {
+        return {
+            status: 400,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Invalid status" },
+        };
+    }
+
+    const schedule = await TriggerSchedule.findById(id);
+    if (!schedule) {
+        return {
+            status: 404,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Schedule not found" },
+        };
+    }
+
+    schedule.status = status;
+    await schedule.save();
+
+    return {
+        status: 200,
+        ok: true,
+        schedule,
+        body: {
+            success: true,
+            message: `Schedule ${status.toLowerCase()} successfully`,
+            schedule,
+        },
+    };
+};
+
 const toggleTriggerEventStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body; // "ACTIVE" or "INACTIVE"
-
-        if (!["ACTIVE", "INACTIVE"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Invalid status" });
-        }
-
-        const schedule = await TriggerSchedule.findById(id);
-        if (!schedule) {
-            return res.status(404).json({ success: false, message: "Schedule not found" });
-        }
-
-        schedule.status = status;
-        await schedule.save();
-
-        // TODO: Agar Inactive kar rahe ho to jobs ko pause/remove kar sakte ho (optional)
-
-        res.status(200).json({
-            success: true,
-            message: `Schedule ${status.toLowerCase()} successfully`,
-            schedule
-        });
+        const { status } = req.body;
+        const result = await toggleTriggerEventStatusForEvent({ id, status });
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Toggle Status Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
 // ==================== DELETE TRIGGER EVENT ====================
+const deleteTriggerEventForEvent = async ({ id }) => {
+    const schedule = await TriggerSchedule.findById(id);
+    if (!schedule) {
+        return {
+            status: 404,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Schedule not found" },
+        };
+    }
+
+    const startJobId = `trigger-start-${schedule.deviceId}-${schedule._id}`;
+    const endJobId = `trigger-end-${schedule.deviceId}-${schedule._id}`;
+
+    await removeScheduleJob(startJobId);
+    await removeScheduleJob(endJobId);
+    await TriggerSchedule.findByIdAndDelete(id);
+
+    return {
+        status: 200,
+        ok: true,
+        schedule,
+        body: {
+            success: true,
+            message: "Trigger schedule and its jobs deleted successfully",
+        },
+    };
+};
+
 const deleteTriggerEvent = async (req, res) => {
     try {
         const { id } = req.params;
-
-        const schedule = await TriggerSchedule.findById(id);
-        if (!schedule) {
-            return res.status(404).json({ success: false, message: "Schedule not found" });
-        }
-
-        // Remove jobs from Redis/Queue
-        const startJobId = `trigger-start-${schedule.deviceId}-${schedule._id}`;
-        const endJobId = `trigger-end-${schedule.deviceId}-${schedule._id}`;
-
-        await removeScheduleJob(startJobId);
-        await removeScheduleJob(endJobId);
-
-        // Delete from MongoDB
-        await TriggerSchedule.findByIdAndDelete(id);
-
-        res.status(200).json({
-            success: true,
-            message: "Trigger schedule and its jobs deleted successfully"
-        });
+        const result = await deleteTriggerEventForEvent({ id });
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Delete Trigger Schedule Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-module.exports = { createTriggerSchedule, getTriggerEventsByDeviceID, toggleTriggerEventStatus, deleteTriggerEvent, getCurrentOrNextTriggerEventData };
+module.exports = {
+    createTriggerSchedule,
+    createTriggerScheduleForDevice,
+    getTriggerEventsByDeviceID,
+    toggleTriggerEventStatus,
+    toggleTriggerEventStatusForEvent,
+    deleteTriggerEvent,
+    deleteTriggerEventForEvent,
+    getCurrentOrNextTriggerEventData,
+};

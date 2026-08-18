@@ -1,5 +1,5 @@
 /*
- * IoTify SMD SCHEDULING — Hostinger live
+ * IOTFIY SMD SCHEDULING — Hostinger live
  * Device: 0OBNGI  (SMDSch)
  * Payload: smoke (%), state
  * Status heartbeat every 30s (needed for live CURRENT event on dashboard)

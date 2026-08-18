@@ -1,5 +1,5 @@
 /*
- * IoTify AQID (Air Quality Index Device) — LOCAL monitoring
+ * IOTFIY AQID (Air Quality Index Device) — LOCAL monitoring
  *
  * Payload fields (monitoringProcessor AQID):
  *   temperature, humidity, AQI [, state]
@@ -183,7 +183,7 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== IoTify AQID Monitoring — LOCAL ===");
+  Serial.println("\n=== IOTFIY AQID Monitoring — LOCAL ===");
   Serial.println("Keys: t/h/a force | n normal | s send | ? help");
 
   setupWiFi();

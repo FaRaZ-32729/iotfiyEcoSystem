@@ -1,5 +1,5 @@
 /*
- * IoTify AC Device — LOCAL testing + LOCK REASSERT
+ * IOTFIY AC Device — LOCAL testing + LOCK REASSERT
  *
  * Lock verify (Serial Monitor 115200):
  *   1. Dashboard pe Lock ON (app se)
@@ -226,7 +226,7 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== IoTify AC — LOCK REASSERT TEST ===");
+  Serial.println("\n=== IOTFIY AC — LOCK REASSERT TEST ===");
 
   setupWiFi();
   client.setServer(mqtt_server, mqtt_port);

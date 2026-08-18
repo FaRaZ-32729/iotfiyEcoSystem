@@ -1,5 +1,5 @@
 /*
- * IoTify AC (Haier YRW02) — ESP wale bande ki bs120 firmware + LOCAL MQTT
+ * IOTFIY AC (Haier YRW02) — ESP wale bande ki bs120 firmware + LOCAL MQTT
  * =======================================================================
  * ESP guy ka asal IR/lock/health/Preferences logic HU-BA-HU rakha gaya hai.
  * Sirf uska local WebServer hata ke MQTT add kiya gaya hai taake aapka
@@ -588,7 +588,7 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== IoTify AC (Haier IR bs120) — LOCAL MQTT ===");
+  Serial.println("\n=== IOTFIY AC (Haier IR bs120) — LOCAL MQTT ===");
 
   // bs120: load saved state from flash
   preferences.begin("ac_remote", false);

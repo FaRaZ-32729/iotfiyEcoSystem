@@ -4,7 +4,6 @@ const {
     getRealtimeModelName,
 } = require("../rag/openaiClient");
 const {
-    getGeminiChatModelName,
     getGeminiLiveModelName,
     useGeminiForText,
     useGeminiForLiveVoice,
@@ -227,9 +226,9 @@ Rules:
     const userPrompt = `User said:\n${String(userText || "(unknown)").trim()}\n\nAssistant spoke:\n${spoken}`;
     try {
         if (useGeminiForText()) {
-            const result = await withGeminiRetry((ai) =>
+            const result = await withGeminiRetry((ai, model) =>
                 ai.models.generateContent({
-                    model: getGeminiChatModelName(),
+                    model,
                     contents: `${system}\n\n${userPrompt}`,
                     config: { temperature: 0.2 },
                 })

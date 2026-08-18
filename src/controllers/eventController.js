@@ -12,57 +12,105 @@ const {
 
 // src/controllers/eventController.js
 
-const createSchedule = async (req, res) => {
-    try {
-        const { deviceId, startTime, endTime, days = [], command = "ON", setTemperature } = req.body;
-        const user = req.user;
+/**
+ * Core schedule-creation logic — the single source of truth shared by the HTTP
+ * controller (POST /api/event/create) and the ECO assistant tool (createEvent).
+ * Contains all validation, conflict detection, Event.create, and BullMQ start/end
+ * job enqueue. Returns a normalized result:
+ *   { status, ok, schedule, device, scheduleType, body }
+ * where `body` is the EXACT JSON payload the HTTP endpoint returns (so the
+ * controller stays behavior-identical) and the extra fields are for programmatic
+ * callers (the agent tool). Throws only on unexpected (DB) errors — callers wrap
+ * in try/catch. NOTE: this does NOT check that `user` may access the device;
+ * the HTTP route enforces that via middleware and the agent tool enforces
+ * ownership before calling this.
+ */
+const createScheduleForDevice = async ({
+    user,
+    deviceId,
+    startTime,
+    endTime,
+    days = [],
+    command = "ON",
+    setTemperature,
+}) => {
+    if (!deviceId || !startTime || !endTime) {
+        return {
+            status: 400,
+            ok: false,
+            schedule: null,
+            device: null,
+            scheduleType: null,
+            body: { success: false, message: "deviceId, startTime, endTime are required" },
+        };
+    }
 
-        if (!deviceId || !startTime || !endTime) {
-            return res.status(400).json({ success: false, message: "deviceId, startTime, endTime are required" });
+    const device = await Device.findOne({ deviceId });
+    if (!device || device.category !== "scheduling") {
+        return {
+            status: 403,
+            ok: false,
+            schedule: null,
+            device: device || null,
+            scheduleType: null,
+            body: { success: false, message: "Invalid or non-scheduling device" },
+        };
+    }
+
+    const isAc = device.deviceType === "AC";
+    let eventCommand = String(command || "ON").toUpperCase().trim();
+
+    if (isAc) {
+        if (!["ON", "OFF"].includes(eventCommand)) {
+            return {
+                status: 400,
+                ok: false,
+                schedule: null,
+                device,
+                scheduleType: null,
+                body: { success: false, message: "AC event command must be ON or OFF" },
+            };
         }
-
-        const device = await Device.findOne({ deviceId });
-        if (!device || device.category !== "scheduling") {
-            return res.status(403).json({ success: false, message: "Invalid or non-scheduling device" });
-        }
-
-        const isAc = device.deviceType === "AC";
-        let eventCommand = String(command || "ON").toUpperCase().trim();
-
-        if (isAc) {
-            if (!["ON", "OFF"].includes(eventCommand)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "AC event command must be ON or OFF"
-                });
-            }
-            if (eventCommand === "ON") {
-                const temp = Number(setTemperature);
-                if (!Number.isFinite(temp)) {
-                    return res.status(400).json({
+        if (eventCommand === "ON") {
+            const temp = Number(setTemperature);
+            if (!Number.isFinite(temp)) {
+                return {
+                    status: 400,
+                    ok: false,
+                    schedule: null,
+                    device,
+                    scheduleType: null,
+                    body: {
                         success: false,
-                        message: "setTemperature is required when AC event command is ON"
-                    });
-                }
+                        message: "setTemperature is required when AC event command is ON",
+                    },
+                };
             }
-        } else {
-            eventCommand = "ON";
         }
+    } else {
+        eventCommand = "ON";
+    }
 
-        const overnight = isOvernight(startTime, endTime);
-        const isRecurring = days.length > 0;
+    const overnight = isOvernight(startTime, endTime);
+    const isRecurring = days.length > 0;
 
-        // Per-device: block overlapping ACTIVE schedules (same days + overlapping time)
-        const existing = await Event.find({ deviceId, status: "ACTIVE" }).lean();
-        const conflict = findScheduleConflict(existing, {
-            startTime,
-            endTime,
-            days,
-            isOvernight: overnight,
-            isRecurring,
-        });
-        if (conflict) {
-            return res.status(409).json({
+    // Per-device: block overlapping ACTIVE schedules (same days + overlapping time)
+    const existing = await Event.find({ deviceId, status: "ACTIVE" }).lean();
+    const conflict = findScheduleConflict(existing, {
+        startTime,
+        endTime,
+        days,
+        isOvernight: overnight,
+        isRecurring,
+    });
+    if (conflict) {
+        return {
+            status: 409,
+            ok: false,
+            schedule: null,
+            device,
+            scheduleType: null,
+            body: {
                 success: false,
                 message:
                     "An event already exists for this device on overlapping day(s) and time. Choose a different time or days.",
@@ -72,99 +120,118 @@ const createSchedule = async (req, res) => {
                     endTime: conflict.endTime,
                     days: conflict.days,
                 },
-            });
-        }
-
-        let startCron, endCron, scheduleType;
-
-        if (isRecurring) {
-            // ==================== RECURRING SCHEDULE ====================
-            scheduleType = "recurring";
-            startCron = generateCron(startTime, days);
-
-            let endDays = overnight ? shiftDays(days) : [...days];
-            endCron = generateCron(endTime, endDays);
-
-        } else {
-            // ==================== ONE-TIME SCHEDULE (Today or Overnight) ====================
-            scheduleType = "one-time";
-
-            const now = new Date();
-            const currentUTCDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-
-            // Use UTC day
-            const utcDayName = now.toLocaleString('en-US', {
-                weekday: 'long',
-                timeZone: 'UTC'
-            }).toLowerCase();
-
-            startCron = generateCron(startTime, [utcDayName]);
-
-            if (overnight) {
-                const nextDayName = getNextDayName(utcDayName);
-                endCron = generateCron(endTime, [nextDayName]);
-                console.log(`🌙 Overnight one-time schedule: ${utcDayName} ${startTime} → ${nextDayName} ${endTime}`);
-            } else {
-                endCron = generateCron(endTime, [utcDayName]);
-            }
-        }
-
-        // const startJobId = `start-${deviceId}-${Date.now()}`;
-        // const endJobId = `end-${deviceId}-${Date.now()}`;
-
-
-        const schedule = await Event.create({
-            deviceId,
-            startTime,
-            endTime,
-            days: isRecurring ? days : [],
-            command: eventCommand,
-            setTemperature: isAc && eventCommand === "ON" ? Number(setTemperature) : null,
-            isOvernight: overnight,
-            isRecurring,
-            startCron,
-            endCron,
-            createdBy: user._id,
-            status: "ACTIVE"
-        });
-
-        const startJobId = `schedule-start-${deviceId}-${schedule._id.toString()}`;
-        const endJobId = `schedule-end-${deviceId}-${schedule._id.toString()}`;
-
-        const jobMeta = {
-            deviceId,
-            startTime,
-            endTime,
-            days: isRecurring ? days : [],
-            eventId: schedule._id.toString(),
-            isRecurring,
-            setTemperature: schedule.setTemperature,
+            },
         };
+    }
 
-        // Start: AC uses event command (ON/OFF); THD/others always ON at window start
-        await addScheduleJob(
-            startJobId,
-            { ...jobMeta, command: isAc ? eventCommand : "ON", type: "start" },
-            startCron
-        );
-        // End: always OFF at window end (worker skips end for AC OFF-only events)
-        await addScheduleJob(
-            endJobId,
-            { ...jobMeta, command: "OFF", type: "end" },
-            endCron
-        );
+    let startCron, endCron, scheduleType;
 
+    if (isRecurring) {
+        // ==================== RECURRING SCHEDULE ====================
+        scheduleType = "recurring";
+        startCron = generateCron(startTime, days);
 
-        res.status(201).json({
+        let endDays = overnight ? shiftDays(days) : [...days];
+        endCron = generateCron(endTime, endDays);
+
+    } else {
+        // ==================== ONE-TIME SCHEDULE (Today or Overnight) ====================
+        scheduleType = "one-time";
+
+        const now = new Date();
+        const currentUTCDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+
+        // Use UTC day
+        const utcDayName = now.toLocaleString('en-US', {
+            weekday: 'long',
+            timeZone: 'UTC'
+        }).toLowerCase();
+
+        startCron = generateCron(startTime, [utcDayName]);
+
+        if (overnight) {
+            const nextDayName = getNextDayName(utcDayName);
+            endCron = generateCron(endTime, [nextDayName]);
+            console.log(`🌙 Overnight one-time schedule: ${utcDayName} ${startTime} → ${nextDayName} ${endTime}`);
+        } else {
+            endCron = generateCron(endTime, [utcDayName]);
+        }
+    }
+
+    const schedule = await Event.create({
+        deviceId,
+        startTime,
+        endTime,
+        days: isRecurring ? days : [],
+        command: eventCommand,
+        setTemperature: isAc && eventCommand === "ON" ? Number(setTemperature) : null,
+        isOvernight: overnight,
+        isRecurring,
+        startCron,
+        endCron,
+        createdBy: user._id,
+        status: "ACTIVE"
+    });
+
+    const startJobId = `schedule-start-${deviceId}-${schedule._id.toString()}`;
+    const endJobId = `schedule-end-${deviceId}-${schedule._id.toString()}`;
+
+    const jobMeta = {
+        deviceId,
+        startTime,
+        endTime,
+        days: isRecurring ? days : [],
+        eventId: schedule._id.toString(),
+        isRecurring,
+        setTemperature: schedule.setTemperature,
+    };
+
+    // Start: AC uses event command (ON/OFF); THD/others always ON at window start
+    await addScheduleJob(
+        startJobId,
+        { ...jobMeta, command: isAc ? eventCommand : "ON", type: "start" },
+        startCron
+    );
+    // End: always OFF at window end (worker skips end for AC OFF-only events)
+    await addScheduleJob(
+        endJobId,
+        { ...jobMeta, command: "OFF", type: "end" },
+        endCron
+    );
+
+    return {
+        status: 201,
+        ok: true,
+        schedule,
+        device,
+        scheduleType,
+        body: {
             success: true,
             message: `${scheduleType} schedule created successfully`,
             schedule,
-            type: scheduleType
+            type: scheduleType,
+        },
+    };
+};
+
+const createSchedule = async (req, res) => {
+    try {
+        const { deviceId, startTime, endTime, days = [], command = "ON", setTemperature } = req.body;
+
+        const result = await createScheduleForDevice({
+            user: req.user,
+            deviceId,
+            startTime,
+            endTime,
+            days,
+            command,
+            setTemperature,
         });
 
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Create Schedule Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
@@ -379,46 +446,66 @@ const getEventsByDevice = async (req, res) => {
 };
 
 // ==================== TOGGLE ACTIVE/INACTIVE (Recurring Only) ====================
+const toggleScheduleStatusForEvent = async ({ id, status }) => {
+    if (!["ACTIVE", "INACTIVE"].includes(status)) {
+        return {
+            status: 400,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Status must be ACTIVE or INACTIVE" },
+        };
+    }
+
+    const schedule = await Event.findById(id);
+    if (!schedule) {
+        return {
+            status: 404,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Schedule not found" },
+        };
+    }
+
+    if (!schedule.isRecurring) {
+        return {
+            status: 400,
+            ok: false,
+            schedule,
+            body: {
+                success: false,
+                message: "Only recurring schedules can be toggled",
+            },
+        };
+    }
+
+    schedule.status = status;
+    await schedule.save();
+
+    if (status === "ACTIVE") {
+        console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
+        await reconcileMissedCommands(schedule.deviceId, {
+            reason: "schedule_toggled_active",
+        });
+    }
+
+    return {
+        status: 200,
+        ok: true,
+        schedule,
+        body: {
+            success: true,
+            message: `Schedule ${status.toLowerCase()} successfully`,
+            schedule,
+        },
+    };
+};
+
 const toggleScheduleStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body; // "ACTIVE" or "INACTIVE"
-
-        if (!["ACTIVE", "INACTIVE"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Status must be ACTIVE or INACTIVE" });
-        }
-
-        const schedule = await Event.findById(id);
-        if (!schedule) {
-            return res.status(404).json({ success: false, message: "Schedule not found" });
-        }
-
-        if (!schedule.isRecurring) {
-            return res.status(400).json({ success: false, message: "Only recurring schedules can be toggled" });
-        }
-
-        schedule.status = status;
-        await schedule.save();
-
-        let reconciliationTriggered = false;
-
-        // ==================== RECONCILIATION LOGIC ====================
-        if (status === "ACTIVE") {
-            console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
-
-            // Call reconciliation to check if we should send ON command immediately
-            await reconcileMissedCommands(schedule.deviceId, {
-                reason: "schedule_toggled_active",
-            });
-            reconciliationTriggered = true;
-        }
-
-        return res.json({
-            success: true,
-            message: `Schedule ${status.toLowerCase()} successfully`,
-            schedule
-        });
-
+        const { status } = req.body;
+        const result = await toggleScheduleStatusForEvent({ id, status });
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Toggle Schedule Status Error:", error);
         return res.status(500).json({ success: false, message: error.message });
@@ -426,57 +513,55 @@ const toggleScheduleStatus = async (req, res) => {
 };
 
 // ==================== DELETE SCHEDULE + REMOVE FROM REDIS ====================
+const deleteScheduleForEvent = async ({ id }) => {
+    const schedule = await Event.findById(id);
+    if (!schedule) {
+        return {
+            status: 404,
+            ok: false,
+            schedule: null,
+            body: { success: false, message: "Schedule not found" },
+        };
+    }
+
+    const startJobId = `schedule-start-${schedule.deviceId}-${schedule._id}`;
+    const endJobId = `schedule-end-${schedule.deviceId}-${schedule._id}`;
+
+    await removeScheduleJob(startJobId);
+    await removeScheduleJob(endJobId);
+    await Event.findByIdAndDelete(id);
+
+    return {
+        status: 200,
+        ok: true,
+        schedule,
+        body: {
+            success: true,
+            message: "Schedule deleted successfully and removed from queue",
+        },
+    };
+};
+
 const deleteSchedule = async (req, res) => {
     try {
         const { id } = req.params;
-
-        const schedule = await Event.findById(id);
-        if (!schedule) {
-            return res.status(404).json({ success: false, message: "Schedule not found" });
-        }
-
-        // Remove jobs from Redis/Queue
-        const startJobId = `schedule-start-${schedule.deviceId}-${schedule._id}`;
-        const endJobId = `schedule-end-${schedule.deviceId}-${schedule._id}`;
-
-        await removeScheduleJob(startJobId);
-        await removeScheduleJob(endJobId);
-
-        // Delete from MongoDB
-        await Event.findByIdAndDelete(id);
-
-        // // Remove repeatable jobs from BullMQ
-        // if (schedule.startJobId) {
-        //     try {
-        //         await scheduleQueue.removeRepeatableByKey(schedule.startJobId);
-        //         console.log(`🗑️ Removed start job from Redis: ${schedule.startJobId}`);
-        //     } catch (e) {
-        //         console.warn(`Could not remove startJobId: ${schedule.startJobId}`);
-        //     }
-        // }
-
-        // if (schedule.endJobId) {
-        //     try {
-        //         await scheduleQueue.removeRepeatableByKey(schedule.endJobId);
-        //         console.log(`🗑️ Removed end job from Redis: ${schedule.endJobId}`);
-        //     } catch (e) {
-        //         console.warn(`Could not remove endJobId: ${schedule.endJobId}`);
-        //     }
-        // }
-
-        // // Delete from MongoDB
-        // await Event.deleteOne({ _id: id });
-
-        res.json({
-            success: true,
-            message: "Schedule deleted successfully and removed from queue"
-        });
-
+        const result = await deleteScheduleForEvent({ id });
+        return res.status(result.status).json(result.body);
     } catch (error) {
         console.error("Delete Schedule Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
 
-module.exports = { createSchedule, manualToggle, getEventsByDevice, toggleScheduleStatus, deleteSchedule, getCurrentOrNextScheduleData };
+module.exports = {
+    createSchedule,
+    createScheduleForDevice,
+    manualToggle,
+    getEventsByDevice,
+    toggleScheduleStatus,
+    toggleScheduleStatusForEvent,
+    deleteSchedule,
+    deleteScheduleForEvent,
+    getCurrentOrNextScheduleData,
+};

@@ -1,5 +1,5 @@
 /*
- * IoTify ED (Energy Monitoring Device) — LOCAL monitoring
+ * IOTFIY ED (Energy Monitoring Device) — LOCAL monitoring
  *
  * Payload fields (monitoringProcessor ED):
  *   temperature, humidity, voltage, current [, state]
@@ -195,7 +195,7 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== IoTify ED Energy Monitoring — LOCAL ===");
+  Serial.println("\n=== IOTFIY ED Energy Monitoring — LOCAL ===");
   Serial.println("Keys: t/h/v/c force | n normal | s send | ? help");
 
   setupWiFi();

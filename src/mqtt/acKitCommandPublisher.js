@@ -1,5 +1,5 @@
 /**
- * AC control over IoTify MQTT — IR pulse comes from Ackit brand API (not ESP flash).
+ * AC control over IOTFIY MQTT — IR pulse comes from Ackit brand API (not ESP flash).
  * Topic: iotify/commands/{deviceId}/control
  *
  * Payload:
