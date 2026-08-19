@@ -58,7 +58,12 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
             deviceId: deviceId
         });
 
-        if (triggerEvent && triggerEvent.status === "INACTIVE") {
+        if (!triggerEvent) {
+            console.log(`⛔ Skipping command for ${deviceId} — trigger event ${eventId} was deleted`);
+            return { skipped: true, reason: "event_deleted" };
+        }
+
+        if (triggerEvent.status === "INACTIVE") {
             console.log(`⛔ Skipping command for Trigger Device ${deviceId} - Event INACTIVE`);
             return { skipped: true, reason: "inactive_trigger_event" };
         }
@@ -76,6 +81,11 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         _id: eventId,
         deviceId: deviceId,
     });
+
+    if (device.category === "scheduling" && !schedule) {
+        console.log(`⛔ Skipping command for ${deviceId} — schedule ${eventId} was deleted`);
+        return { skipped: true, reason: "event_deleted" };
+    }
 
     if (schedule && schedule.isRecurring && schedule.status === "INACTIVE") {
         console.log(`⛔ Skipping command ${command} for ${deviceId} - Recurring event is INACTIVE`);

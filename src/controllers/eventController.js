@@ -2,7 +2,7 @@
 const Event = require("../models/eventModel");
 const Device = require("../models/deviceModel");
 const { generateCron, isOvernight } = require("../queues/cronHelper");
-const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
+const { addScheduleJob, removeScheduleJob, removeJobsForEventId } = require("../queues/scheduleService");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("../queues/scheduleQueue");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
@@ -529,6 +529,7 @@ const deleteScheduleForEvent = async ({ id }) => {
 
     await removeScheduleJob(startJobId);
     await removeScheduleJob(endJobId);
+    await removeJobsForEventId(schedule._id);
     await Event.findByIdAndDelete(id);
 
     return {

@@ -2,7 +2,7 @@
 const TriggerSchedule = require("../models/triggerEventModel");
 const Device = require("../models/deviceModel");
 const { generateCron } = require("../queues/cronHelper");
-const { addScheduleJob, removeScheduleJob } = require("../queues/scheduleService");
+const { addScheduleJob, removeScheduleJob, removeJobsForEventId } = require("../queues/scheduleService");
 
 /**
  * Core trigger-event creation — shared by POST /api/trigger/create-event
@@ -351,6 +351,7 @@ const deleteTriggerEventForEvent = async ({ id }) => {
 
     await removeScheduleJob(startJobId);
     await removeScheduleJob(endJobId);
+    await removeJobsForEventId(schedule._id);
     await TriggerSchedule.findByIdAndDelete(id);
 
     return {
