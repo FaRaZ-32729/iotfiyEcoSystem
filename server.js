@@ -22,11 +22,18 @@ const app = express();
 const server = http.createServer(app);
 
 // Middlewares
-const allowedOrigins = [
-    "https://iotfiy-ecosystem.vercel.app",
-    "http://localhost:5173",
-    "https://ecosystem.iotfiysolutions.com"
-];
+const allowedOrigins = (
+    process.env.FRONTEND_ORIGINS ||
+    [
+        "https://iotfiy-ecosystem.vercel.app",
+        "http://localhost:5173",
+        "https://ecosystem.iotfiysolutions.com",
+        "https://inara-suprasense.vercel.app",
+    ].join(",")
+)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 app.use(cors({
     origin: function (origin, callback) {
@@ -43,7 +50,7 @@ app.use(cors({
 // Initialize Socket.io
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:5173", "https://iotfiy-ecosystem.vercel.app", "https://ecosystem.iotfiysolutions.com"],
+        origin: allowedOrigins,
         methods: ["GET", "POST",],
         credentials: true
     }
