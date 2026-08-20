@@ -1019,7 +1019,8 @@ const me = async (req, res) => {
             organizations: populatedUser.organizations,
             venues: populatedUser.venues.map((v) => ({
                 venueId: v.venueId?._id,
-                venueName: v.venueName || v.venueId?.name,
+                // Prefer live Venue.name — denormalized venueName can be stale after rename
+                venueName: v.venueId?.name || v.venueName,
                 organization: v.venueId?.organization
                     ? {
                           id: v.venueId.organization._id,

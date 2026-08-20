@@ -639,6 +639,14 @@ async function updateVenue(user, args = {}) {
     if (targetOrg) venue.organization = targetOrg._id;
     await venue.save();
 
+    if (newName) {
+        await User.updateMany(
+            { "venues.venueId": venue._id },
+            { $set: { "venues.$[elem].venueName": venue.name } },
+            { arrayFilters: [{ "elem.venueId": venue._id }] }
+        );
+    }
+
     const previousOrganizationId = String(currentOrg._id);
     const moved = Boolean(
         targetOrg && String(targetOrg._id) !== previousOrganizationId

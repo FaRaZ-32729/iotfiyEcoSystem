@@ -210,6 +210,15 @@ const updateVenue = async (req, res) => {
 
         await venue.save();
 
+        // Keep denormalized venueName on assigned sub-users in sync
+        if (validatedData.name) {
+            await User.updateMany(
+                { "venues.venueId": venue._id },
+                { $set: { "venues.$[elem].venueName": venue.name } },
+                { arrayFilters: [{ "elem.venueId": venue._id }] }
+            );
+        }
+
         return res.status(200).json({
             success: true,
             message: "Venue updated successfully",
