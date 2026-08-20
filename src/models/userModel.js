@@ -94,6 +94,23 @@ const userSchema = new mongoose.Schema({
     resetTokenExpiry: Date,
     lastLogin: Date,
 
+    // ==================== QR LOGIN (sub-users) ====================
+    // Permanent scan-to-login token (manager can regenerate / disable)
+    qrLoginToken: {
+        type: String,
+        default: null,
+        sparse: true,
+        unique: true,
+        index: true,
+    },
+    qrLoginEnabled: {
+        type: Boolean,
+        default: true,
+    },
+    qrLoginRotatedAt: {
+        type: Date,
+        default: null,
+    },
 
     tempEmail: {
         type: String,

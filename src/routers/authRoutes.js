@@ -1,6 +1,6 @@
 // src/modules/authRoutes.js
 const express = require("express");
-const { registerUser, loginUser, verifyOTP, setPassword, createUserByAdmin, registerAdmin, logoutUser, createSubUser, forgotPassword, resetPassword, me, resendOTP } = require("../controllers/authController");
+const { registerUser, loginUser, loginWithQr, verifyOTP, setPassword, createUserByAdmin, registerAdmin, logoutUser, createSubUser, forgotPassword, resetPassword, me, resendOTP } = require("../controllers/authController");
 const authenticate = require("../middlewares/auth");
 const checkPendingSubscription = require("../middlewares/checkPendingSubscription");
 const roleGuard = require("../middlewares/roleGuard");
@@ -18,6 +18,7 @@ router.post(
     createSubUser
 );
 router.post("/login", loginUser);
+router.post("/qr-login", loginWithQr);
 router.post("/verify-otp", verifyOTP);
 router.post("/verify-otp/:token", verifyOTP);
 router.post("/resend-otp", resendOTP);

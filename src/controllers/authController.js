@@ -8,6 +8,7 @@ const Organization = require("../models/organizationModel");
 const Venue = require("../models/venueModel");
 const checkSubscriptionLimit = require("../middlewares/subscriptionLimit");
 const { registerSchema, adminCreateUserSchema, createSubUserSchema } = require("../validations/userValidation");
+const { generateQrLoginToken, buildQrLoginUrl } = require("../utils/qrLogin");
 require("dotenv").config();
 
 function summarizeCurrentSubscription(sub) {
@@ -395,6 +396,7 @@ const createSubUser = async (req, res) => {
         }
 
         // Create user
+        const qrLoginToken = generateQrLoginToken();
         newUser = await User.create({
             name: validatedData.name,
             email: email,
@@ -406,7 +408,10 @@ const createSubUser = async (req, res) => {
             permission: validatedData.permission,
             timer: validatedData.timer,
             isActive: false,
-            isVerified: false
+            isVerified: false,
+            qrLoginToken,
+            qrLoginEnabled: true,
+            qrLoginRotatedAt: new Date(),
         });
 
         if (!process.env.JWT_SECRET) {
@@ -430,6 +435,7 @@ const createSubUser = async (req, res) => {
         await newUser.save();
 
         const setupLink = `${process.env.FRONTEND_URL}/setup-password/${setupToken}`;
+        const qrUrl = buildQrLoginUrl(qrLoginToken);
 
         try {
             await sendEmail(
@@ -460,7 +466,8 @@ const createSubUser = async (req, res) => {
                 email: newUser.email,
                 role: newUser.role,
                 permission: newUser.permission
-            }
+            },
+            qrUrl,
         });
 
     } catch (error) {
@@ -746,6 +753,112 @@ const loginUser = async (req, res) => {
     }
 };
 
+/**
+ * Permanent QR login for manager-created sub-users.
+ * Body: { token: qrLoginToken }
+ * Response shape matches loginUser so the frontend can reuse the same auth flow.
+ */
+const loginWithQr = async (req, res) => {
+    try {
+        const raw = req.body?.token ?? req.body?.qrToken;
+        const token = typeof raw === "string" ? raw.trim() : "";
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: "QR token is required",
+            });
+        }
+
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: "Server misconfiguration: JWT_SECRET is missing.",
+            });
+        }
+
+        const user = await User.findOne({ qrLoginToken: token });
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid or revoked QR code",
+            });
+        }
+
+        if (user.role !== "user") {
+            return res.status(403).json({
+                success: false,
+                message: "QR login is only for team users",
+            });
+        }
+
+        if (user.qrLoginEnabled === false) {
+            return res.status(403).json({
+                success: false,
+                message: "QR login is disabled for this user. Ask your manager.",
+            });
+        }
+
+        if (user.suspensionReason) {
+            return res.status(403).json({
+                success: false,
+                message: "Account is suspended",
+            });
+        }
+
+        // QR is a manager-trusted invite path: activate without password setup
+        let dirty = false;
+        if (!user.isVerified) {
+            user.isVerified = true;
+            dirty = true;
+        }
+        if (!user.isActive) {
+            user.isActive = true;
+            dirty = true;
+        }
+        user.lastLogin = new Date();
+        dirty = true;
+        if (dirty) await user.save();
+
+        const jwtToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, {
+            expiresIn: "7d",
+        });
+
+        const currentSubscription = await loadCurrentSubscription(user);
+        const managerSubscriptionStatus = await loadManagerSubscriptionStatus(user);
+
+        res.cookie("token", jwtToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
+        return res.json({
+            success: true,
+            message: "Login successful",
+            token: jwtToken,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isActive: user.isActive,
+                permission: user.permission || null,
+                currentSubscription,
+                managerSubscriptionStatus,
+            },
+        });
+    } catch (error) {
+        console.error("QR login error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while logging in with QR",
+        });
+    }
+};
+
 // logout user 
 const logoutUser = async (req, res) => {
     try {
@@ -943,6 +1056,7 @@ module.exports = {
     verifyOTP,
     resendOTP,
     loginUser,
+    loginWithQr,
     logoutUser,
     createSubUser,
     forgotPassword,

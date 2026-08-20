@@ -10,6 +10,7 @@ const mongoose = require("mongoose")
 // src/validations/user.validation.js
 const { z } = require("zod");
 const sendEmail = require("../services/emailServices");
+const { generateQrLoginToken, buildQrLoginUrl } = require("../utils/qrLogin");
 
 const updateProfileSchema = z.object({
     name: z.string().min(2).optional(),
@@ -89,7 +90,7 @@ const getUsersByManager = async (req, res) => {
         const subUsers = await User.find({
             creatorId: managerId,
             role: "user"
-        }).select("-password -otp -otpExpiry -setupToken -resetToken -resetTokenExpiry")
+        }).select("-password -otp -otpExpiry -setupToken -resetToken -resetTokenExpiry -qrLoginToken")
             .populate("organizations", "name")
             .populate("venues.venueId", "name")
             .sort({ createdAt: -1 });
@@ -121,7 +122,7 @@ const getSingleUser = async (req, res) => {
         const { userId } = req.params;
 
         const user = await User.findById(userId)
-            .select("-password -otp -otpExpiry -setupToken -resetToken -resetTokenExpiry")
+            .select("-password -otp -otpExpiry -setupToken -resetToken -resetTokenExpiry -qrLoginToken")
             .populate("organizations", "name")
             .populate("currentSubscription", "plan status endDate")
             .populate("venues.venueId", "name")
@@ -576,4 +577,109 @@ const verifyEmailChange = async (req, res) => {
     }
 };
 
-module.exports = { getSingleUser, suspendManager, getAllUsers, getAllManagers, getUsersByManager, deleteUser, deleteManager, updateManagerCreatedUser, requestEmailChange, verifyEmailChange,};
+async function findManagedSubUser(manager, userId) {
+    if (!manager || manager.role !== "manager") {
+        return { error: { status: 403, message: "Only managers can manage QR login" } };
+    }
+    const subUser = await User.findById(userId);
+    if (!subUser || subUser.role !== "user") {
+        return { error: { status: 404, message: "User not found" } };
+    }
+    if (String(subUser.creatorId) !== String(manager._id)) {
+        return { error: { status: 403, message: "You can only manage users you created" } };
+    }
+    return { subUser };
+}
+
+// ====================== GET / ENSURE QR LOGIN URL ======================
+const getSubUserQrLogin = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { subUser, error } = await findManagedSubUser(req.user, userId);
+        if (error) {
+            return res.status(error.status).json({ success: false, message: error.message });
+        }
+
+        if (!process.env.FRONTEND_URL) {
+            return res.status(500).json({
+                success: false,
+                message: "Server misconfiguration: FRONTEND_URL is missing.",
+            });
+        }
+
+        // Older users created before QR feature — mint token on first view
+        if (!subUser.qrLoginToken) {
+            subUser.qrLoginToken = generateQrLoginToken();
+            subUser.qrLoginEnabled = true;
+            subUser.qrLoginRotatedAt = new Date();
+            await subUser.save();
+        }
+
+        return res.status(200).json({
+            success: true,
+            user: {
+                id: subUser._id,
+                name: subUser.name,
+                email: subUser.email,
+            },
+            qrUrl: buildQrLoginUrl(subUser.qrLoginToken),
+            qrLoginEnabled: subUser.qrLoginEnabled !== false,
+        });
+    } catch (err) {
+        console.error("Get sub-user QR error:", err);
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// ====================== REGENERATE QR LOGIN ======================
+const regenerateSubUserQrLogin = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { subUser, error } = await findManagedSubUser(req.user, userId);
+        if (error) {
+            return res.status(error.status).json({ success: false, message: error.message });
+        }
+
+        if (!process.env.FRONTEND_URL) {
+            return res.status(500).json({
+                success: false,
+                message: "Server misconfiguration: FRONTEND_URL is missing.",
+            });
+        }
+
+        subUser.qrLoginToken = generateQrLoginToken();
+        subUser.qrLoginEnabled = true;
+        subUser.qrLoginRotatedAt = new Date();
+        await subUser.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "QR login code regenerated. Old QR codes will no longer work.",
+            user: {
+                id: subUser._id,
+                name: subUser.name,
+                email: subUser.email,
+            },
+            qrUrl: buildQrLoginUrl(subUser.qrLoginToken),
+            qrLoginEnabled: true,
+        });
+    } catch (err) {
+        console.error("Regenerate sub-user QR error:", err);
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+module.exports = {
+    getSingleUser,
+    suspendManager,
+    getAllUsers,
+    getAllManagers,
+    getUsersByManager,
+    deleteUser,
+    deleteManager,
+    updateManagerCreatedUser,
+    requestEmailChange,
+    verifyEmailChange,
+    getSubUserQrLogin,
+    regenerateSubUserQrLogin,
+};
