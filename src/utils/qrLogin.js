@@ -11,10 +11,18 @@ function generateQrLoginToken() {
 
 /**
  * Public URL embedded in the QR code.
- * Uses FRONTEND_URL (primary production site).
+ * Prefer QR_FRONTEND_URL (e.g. Inara); fall back to FRONTEND_URL.
  */
+function getQrFrontendBase() {
+  return (
+    process.env.QR_FRONTEND_URL ||
+    process.env.FRONTEND_URL ||
+    ""
+  ).replace(/\/$/, "");
+}
+
 function buildQrLoginUrl(token) {
-  const base = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
+  const base = getQrFrontendBase();
   if (!base || !token) return null;
   return `${base}/q/${token}`;
 }
@@ -22,4 +30,5 @@ function buildQrLoginUrl(token) {
 module.exports = {
   generateQrLoginToken,
   buildQrLoginUrl,
+  getQrFrontendBase,
 };

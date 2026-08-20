@@ -10,7 +10,7 @@ const mongoose = require("mongoose")
 // src/validations/user.validation.js
 const { z } = require("zod");
 const sendEmail = require("../services/emailServices");
-const { generateQrLoginToken, buildQrLoginUrl } = require("../utils/qrLogin");
+const { generateQrLoginToken, buildQrLoginUrl, getQrFrontendBase } = require("../utils/qrLogin");
 
 const updateProfileSchema = z.object({
     name: z.string().min(2).optional(),
@@ -600,10 +600,10 @@ const getSubUserQrLogin = async (req, res) => {
             return res.status(error.status).json({ success: false, message: error.message });
         }
 
-        if (!process.env.FRONTEND_URL) {
+        if (!getQrFrontendBase()) {
             return res.status(500).json({
                 success: false,
-                message: "Server misconfiguration: FRONTEND_URL is missing.",
+                message: "Server misconfiguration: QR_FRONTEND_URL or FRONTEND_URL is missing.",
             });
         }
 
@@ -640,10 +640,10 @@ const regenerateSubUserQrLogin = async (req, res) => {
             return res.status(error.status).json({ success: false, message: error.message });
         }
 
-        if (!process.env.FRONTEND_URL) {
+        if (!getQrFrontendBase()) {
             return res.status(500).json({
                 success: false,
-                message: "Server misconfiguration: FRONTEND_URL is missing.",
+                message: "Server misconfiguration: QR_FRONTEND_URL or FRONTEND_URL is missing.",
             });
         }
 
