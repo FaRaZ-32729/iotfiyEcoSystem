@@ -977,7 +977,27 @@ const resetPassword = async (req, res) => {
 // verified user after login
 const me = async (req, res) => {
     try {
-        const user = req.user;
+        let user = req.user;
+
+        // Backfill: venues this sub-user created before auto-assign existed
+        if (user.role === "user") {
+            const createdVenues = await Venue.find({ createdBy: user._id }).select("_id name");
+            if (createdVenues.length) {
+                const assigned = new Set(
+                    (user.venues || []).map((v) => String(v.venueId?._id || v.venueId))
+                );
+                const toAdd = createdVenues
+                    .filter((v) => !assigned.has(String(v._id)))
+                    .map((v) => ({ venueId: v._id, venueName: v.name }));
+                if (toAdd.length) {
+                    await User.findByIdAndUpdate(user._id, {
+                        $push: { venues: { $each: toAdd } },
+                    });
+                    user = await User.findById(user._id);
+                    req.user = user;
+                }
+            }
+        }
 
         const populatedUser = await user.populate([
             {

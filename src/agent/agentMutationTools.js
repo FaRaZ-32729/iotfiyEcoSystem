@@ -486,6 +486,22 @@ async function createVenue(user, args = {}) {
         createdBy: user._id,
     });
 
+    if (user.role === "user") {
+        const alreadyAssigned = (user.venues || []).some(
+            (v) => String(v.venueId) === String(venue._id)
+        );
+        if (!alreadyAssigned) {
+            await User.findByIdAndUpdate(user._id, {
+                $push: {
+                    venues: {
+                        venueId: venue._id,
+                        venueName: venue.name,
+                    },
+                },
+            });
+        }
+    }
+
     return {
         success: true,
         message: "Venue created successfully.",

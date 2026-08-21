@@ -58,9 +58,22 @@ const createVenue = async (req, res) => {
             createdBy: user._id
         });
 
-        // await User.findByIdAndUpdate(user._id, {
-        //     $push: { venues: venue._id },
-        // });
+        // Sub-users only see venues in user.venues — auto-assign venues they create
+        if (user.role === "user") {
+            const alreadyAssigned = (user.venues || []).some(
+                (v) => String(v.venueId) === String(venue._id)
+            );
+            if (!alreadyAssigned) {
+                await User.findByIdAndUpdate(user._id, {
+                    $push: {
+                        venues: {
+                            venueId: venue._id,
+                            venueName: venue.name,
+                        },
+                    },
+                });
+            }
+        }
 
         res.status(201).json({
             success: true,
