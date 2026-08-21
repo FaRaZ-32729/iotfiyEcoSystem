@@ -94,14 +94,11 @@ const userSchema = new mongoose.Schema({
     resetTokenExpiry: Date,
     lastLogin: Date,
 
-    // ==================== QR LOGIN (sub-users) ====================
-    // Permanent scan-to-login token (manager can regenerate / disable)
+    // ==================== QR LOGIN (sub-users / role=user ONLY) ====================
+    // Managers/admins must NOT get a unique null token — that caused E11000 on signup.
+    // No default: field omitted unless createSubUser sets a real string.
     qrLoginToken: {
         type: String,
-        default: null,
-        sparse: true,
-        unique: true,
-        index: true,
     },
     qrLoginEnabled: {
         type: Boolean,
@@ -129,6 +126,60 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ role: 1 });
 userSchema.index({ createdBy: 1 });
 userSchema.index({ creatorId: 1 });
+// Unique only when a real QR token string exists (sub-users). Multiple missing/null OK.
+userSchema.index(
+    { qrLoginToken: 1 },
+    {
+        unique: true,
+        name: "qrLoginToken_partial_unique",
+        partialFilterExpression: {
+            qrLoginToken: { $exists: true, $type: "string", $gt: "" },
+        },
+    }
+);
+
+/**
+ * One-time-safe repair for production: old unique index on qrLoginToken blocked
+ * manager signup (many docs with null). Call after mongoose.connect.
+ */
+async function ensureQrLoginTokenIndex() {
+    const col = userModel.collection;
+    try {
+        const indexes = await col.indexes();
+        const bad = indexes.find(
+            (idx) =>
+                idx.name === "qrLoginToken_1" ||
+                (idx.key && idx.key.qrLoginToken === 1 && !idx.partialFilterExpression)
+        );
+        if (bad) {
+            await col.dropIndex(bad.name);
+            console.log(`[User] Dropped legacy index ${bad.name} (blocked manager signup)`);
+        }
+    } catch (err) {
+        if (err?.code !== 27 && err?.codeName !== "IndexNotFound") {
+            console.warn("[User] qrLoginToken index drop:", err.message);
+        }
+    }
+
+    // Managers/admins: remove explicit null so field is absent
+    const unsetResult = await userModel.updateMany(
+        {
+            $or: [
+                { qrLoginToken: null },
+                { qrLoginToken: "" },
+            ],
+        },
+        { $unset: { qrLoginToken: 1 } }
+    );
+    if (unsetResult.modifiedCount > 0) {
+        console.log(
+            `[User] Cleared empty qrLoginToken on ${unsetResult.modifiedCount} account(s)`
+        );
+    }
+
+    await userModel.syncIndexes();
+}
 
 const userModel = mongoose.model("User", userSchema);
+userModel.ensureQrLoginTokenIndex = ensureQrLoginTokenIndex;
 module.exports = userModel;

@@ -11,6 +11,12 @@ const dbConnection = async () => {
     try {
         await mongoose.connect(process.env.MONGODB_URL);
         console.log("DB Connected Successfully");
+
+        // QR login is sub-user only; repair legacy unique(null) index that broke manager signup
+        const User = require("../models/userModel");
+        if (typeof User.ensureQrLoginTokenIndex === "function") {
+            await User.ensureQrLoginTokenIndex();
+        }
     } catch (error) {
         console.log("error while connection with mongoDB", error.message);
     }
