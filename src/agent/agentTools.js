@@ -17,7 +17,7 @@ const {
 const { computeConnectivity } = require("../utils/deviceConnectivity");
 
 const DEVICE_LIST_SELECT =
-    "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert energyMonitoringIncluded";
+    "deviceId deviceName deviceType category status state lastSeen lastUpdateTime venue brandName setTemperature acMode fanSpeed acLocked espTemperature espHumidity espPower espEnergy espCurrent espVoltage espOdour espAQI espSmokePct espWaterLeak temperatureAlert humidityAlert odourAlert aqiAlert smokeAlert waterLeakAlert glAlert voltageAlert currentAlert acHealthAlert acHealthMonitoringIncluded energyMonitoringIncluded";
 
 /**
  * Resolve venue ObjectIds this user is allowed to see.
@@ -91,6 +91,7 @@ function slimDevice(d) {
         acLocked: d.acLocked,
         brandName: d.brandName,
         energyMonitoringIncluded: d.energyMonitoringIncluded,
+        acHealthMonitoringIncluded: d.acHealthMonitoringIncluded,
         live: {
             temperature: d.espTemperature,
             humidity: d.espHumidity,

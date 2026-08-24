@@ -16,9 +16,9 @@ const processSchedulingDeviceData = async (device, payload) => {
     const previousLastUpdate = device.lastUpdateTime;
     const previousPowerW = device.espPower;
 
-    // Non-AC devices: live sensor temperature → espTemperature
-    // AC: sensor room temp NOT used — only setpoint (setTemperature) below
-    if (!isAc && payload.temperature !== undefined) {
+    // Live sensor temperature → espTemperature (AC room temp + non-AC sensors)
+    // AC setpoint stays in setTemperature (separate from ESP room reading)
+    if (payload.temperature !== undefined) {
         device.espTemperature = payload.temperature;
         updatedFields.push(`temperature: ${payload.temperature}`);
     }
@@ -89,14 +89,19 @@ const processSchedulingDeviceData = async (device, payload) => {
             v === "1" ||
             String(v).toLowerCase() === "true";
 
-        if (payload.acHealth !== undefined) {
-            const healthy = parseEspFlag(payload.acHealth);
-            device.acHealthAlert = !healthy;
-            updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
-        } else if (payload.acHealthAlert !== undefined) {
-            // Do not use !!value — "0" / "false" are truthy strings
-            device.acHealthAlert = parseEspFlag(payload.acHealthAlert);
-            updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
+        if (device.acHealthMonitoringIncluded) {
+            if (payload.acHealth !== undefined) {
+                const healthy = parseEspFlag(payload.acHealth);
+                device.acHealthAlert = !healthy;
+                updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
+            } else if (payload.acHealthAlert !== undefined) {
+                // Do not use !!value — "0" / "false" are truthy strings
+                device.acHealthAlert = parseEspFlag(payload.acHealthAlert);
+                updatedFields.push(`acHealthAlert: ${device.acHealthAlert}`);
+            }
+        } else if (device.acHealthAlert) {
+            device.acHealthAlert = false;
+            updatedFields.push("acHealthAlert: false (health monitoring off)");
         }
 
         // Energy module: ESP sends current only. V=220 assumed. P=I×V. Units (kWh) integrated over time.
@@ -350,7 +355,9 @@ const processSchedulingDeviceData = async (device, payload) => {
                 fanSpeed: device.fanSpeed,
                 acLocked: device.acLocked,
                 acHealthAlert: device.acHealthAlert,
+                acHealthMonitoringIncluded: device.acHealthMonitoringIncluded,
                 energyMonitoringIncluded: device.energyMonitoringIncluded,
+                espTemperature: device.espTemperature,
                 espCurrent: device.espCurrent,
                 espVoltage: device.espVoltage,
                 espPower: device.espPower,

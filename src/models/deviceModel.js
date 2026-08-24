@@ -73,6 +73,8 @@ const deviceSchema = new mongoose.Schema({
     },
     acLocked: { type: Boolean, default: false },
     acHealthAlert: { type: Boolean, default: false },
+    /** When true: show AC health alerts. When false: show live ESP room temperature instead. */
+    acHealthMonitoringIncluded: { type: Boolean, default: false },
     energyMonitoringIncluded: { type: Boolean, default: false },
     espPower: { type: Number, default: null },
     espEnergy: { type: Number, default: null },
@@ -123,7 +125,7 @@ deviceSchema.pre('save', async function () {
         "AC": [
             "brandName",
             "setTemperature", "acMode", "fanSpeed", "acLocked",
-            "acHealthAlert", "energyMonitoringIncluded",
+            "acHealthAlert", "acHealthMonitoringIncluded", "energyMonitoringIncluded",
             "espCurrent", "espVoltage", "espPower", "espEnergy"
         ]
     };
@@ -187,7 +189,7 @@ deviceSchema.set('toJSON', {
             "AC": [
                 "brandName",
                 "setTemperature", "acMode", "fanSpeed", "acLocked",
-                "acHealthAlert", "energyMonitoringIncluded",
+                "acHealthAlert", "acHealthMonitoringIncluded", "energyMonitoringIncluded",
                 "espCurrent", "espVoltage", "espPower", "espEnergy"
             ]
         };

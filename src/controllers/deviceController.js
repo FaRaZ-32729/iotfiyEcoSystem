@@ -196,6 +196,8 @@ const createDevice = async (req, res) => {
                 fanSpeed: "Low",
                 acLocked: false,
                 acHealthAlert: false,
+                acHealthMonitoringIncluded:
+                    validatedData.acHealthMonitoringIncluded === true,
                 energyMonitoringIncluded: validatedData.energyMonitoringIncluded === true,
             }
             : {};
@@ -238,6 +240,7 @@ const createDevice = async (req, res) => {
                     fanSpeed: device.fanSpeed,
                     acLocked: device.acLocked,
                     acHealthAlert: device.acHealthAlert,
+                    acHealthMonitoringIncluded: device.acHealthMonitoringIncluded,
                     energyMonitoringIncluded: device.energyMonitoringIncluded,
                 }),
             }
@@ -612,6 +615,12 @@ const updateDevice = async (req, res) => {
         if (typeof validatedData.energyMonitoringIncluded === "boolean") {
             device.energyMonitoringIncluded = validatedData.energyMonitoringIncluded;
         }
+        if (typeof validatedData.acHealthMonitoringIncluded === "boolean") {
+            device.acHealthMonitoringIncluded = validatedData.acHealthMonitoringIncluded;
+            if (!validatedData.acHealthMonitoringIncluded) {
+                device.acHealthAlert = false;
+            }
+        }
 
         const nextType = validatedData.deviceType || device.deviceType;
 
@@ -974,7 +983,9 @@ const updateAcSettings = async (req, res) => {
                 fanSpeed: device.fanSpeed,
                 acLocked: device.acLocked,
                 acHealthAlert: device.acHealthAlert,
+                acHealthMonitoringIncluded: device.acHealthMonitoringIncluded,
                 energyMonitoringIncluded: device.energyMonitoringIncluded,
+                espTemperature: device.espTemperature,
             },
         });
     } catch (error) {

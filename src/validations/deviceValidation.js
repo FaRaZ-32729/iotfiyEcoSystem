@@ -18,6 +18,7 @@ const createDeviceSchema = z.object({
     conditions: z.array(conditionSchema).default([]),
     interval: z.number().min(1).optional(),
     energyMonitoringIncluded: z.boolean().optional(),
+    acHealthMonitoringIncluded: z.boolean().optional(),
     /** AC only — Ackit brand name (unique) */
     brandName: z.string().min(1).max(100).optional(),
 
@@ -83,6 +84,7 @@ const updateDeviceSchema = z.object({
     conditions: z.array(conditionSchema).optional(),
     interval: z.number().min(1).optional(),
     energyMonitoringIncluded: z.boolean().optional(),
+    acHealthMonitoringIncluded: z.boolean().optional(),
     brandName: z.string().min(1).max(100).optional(),
 
     // Flat Alert Access Fields for Update
