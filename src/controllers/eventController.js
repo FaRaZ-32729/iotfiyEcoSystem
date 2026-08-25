@@ -10,7 +10,22 @@ const {
     getCurrentOrNextScheduleData,
 } = require("../services/scheduleLookupService");
 
-// src/controllers/eventController.js
+/** Push CURRENT/NEXT (or NO_EVENT) to dashboard cards — does not wait for ESP status. */
+const emitDeviceScheduleUpdate = async (deviceId, reason = "schedule_mutation") => {
+    if (!deviceId || !global.io) return;
+    try {
+        const eventData = await getCurrentOrNextScheduleData(deviceId);
+        global.io.emit(`device/${deviceId}/schedule`, {
+            ...eventData,
+        });
+        console.log(
+            `[SCHEDULE-DEBUG][EMIT] device=${deviceId} reason=${reason} ` +
+                `type=${eventData?.type || "?"} eventId=${eventData?.event?._id || "none"}`
+        );
+    } catch (err) {
+        console.error(`[SCHEDULE-DEBUG][EMIT] failed device=${deviceId}:`, err.message);
+    }
+};
 
 /**
  * Core schedule-creation logic — the single source of truth shared by the HTTP
@@ -212,6 +227,8 @@ const createScheduleForDevice = async ({
         { ...jobMeta, command: "OFF", type: "end" },
         endCron
     );
+
+    await emitDeviceScheduleUpdate(deviceId, "event_create");
 
     return {
         status: 201,
@@ -502,6 +519,8 @@ const toggleScheduleStatusForEvent = async ({ id, status }) => {
         });
     }
 
+    await emitDeviceScheduleUpdate(schedule.deviceId, `event_toggle_${status.toLowerCase()}`);
+
     return {
         status: 200,
         ok: true,
@@ -544,7 +563,10 @@ const deleteScheduleForEvent = async ({ id }) => {
     await removeScheduleJob(startJobId);
     await removeScheduleJob(endJobId);
     await removeJobsForEventId(schedule._id);
+    const deviceId = schedule.deviceId;
     await Event.findByIdAndDelete(id);
+
+    await emitDeviceScheduleUpdate(deviceId, "event_delete");
 
     return {
         status: 200,
