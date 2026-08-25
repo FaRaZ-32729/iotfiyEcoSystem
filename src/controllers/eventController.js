@@ -230,6 +230,27 @@ const createScheduleForDevice = async ({
 
     await emitDeviceScheduleUpdate(deviceId, "event_create");
 
+    // If create lands inside an active window (incl. overnight), force apply now.
+    // Immediate trigger in addScheduleJob usually covers this; reconcile is a
+    // safety net when that path misses (overnight edge) or device was already ON.
+    try {
+        const live = await getCurrentOrNextScheduleData(deviceId);
+        if (live?.type === "CURRENT" && live?.event) {
+            console.log(
+                `[SCHEDULE-DEBUG][CREATE] CURRENT window → reconcile device=${deviceId} ` +
+                    `command=${live.event.command || "ON"} eventId=${live.event._id}`
+            );
+            await reconcileMissedCommands(deviceId, {
+                reason: "event_create_inside_window",
+            });
+        }
+    } catch (err) {
+        console.error(
+            `[SCHEDULE-DEBUG][CREATE] reconcile after create failed device=${deviceId}:`,
+            err.message
+        );
+    }
+
     return {
         status: 201,
         ok: true,
