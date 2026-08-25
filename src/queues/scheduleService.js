@@ -109,9 +109,25 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
         // ==================== IMMEDIATE TRIGGER LOGIC (Only for TODAY) ====================
         if (data.type === "start") {
             const { startTime, endTime, command = "ON" } = data;
+            const overnight = !!(startTime && endTime && startTime > endTime);
 
+            const dayOrder = [
+                "sunday",
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+            ];
+            const prevUtcDay =
+                dayOrder[(dayOrder.indexOf(utcDayName) + 6) % 7];
+
+            // Overnight morning segment (e.g. Tue 02:00) belongs to Monday's start day
             const isForToday = data.days?.length
-                ? data.days.some(day => day.toLowerCase() === utcDayName)
+                ? overnight && currentTime < endTime
+                    ? data.days.some((day) => day.toLowerCase() === prevUtcDay)
+                    : data.days.some((day) => day.toLowerCase() === utcDayName)
                 : true;
 
             if (!isForToday) {
@@ -119,9 +135,16 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
                 return job;
             }
 
-            console.log(`Checking if current time (${currentTime}) is inside window: ${startTime} - ${endTime}`);
+            console.log(
+                `Checking if current time (${currentTime}) is inside window: ${startTime} - ${endTime}` +
+                    (overnight ? " (overnight)" : "")
+            );
 
-            const isCurrentlyActive = currentTime >= startTime && currentTime < endTime;
+            // Same-day: start <= now < end
+            // Overnight: now >= start OR now < end (crosses midnight UTC)
+            const isCurrentlyActive = overnight
+                ? currentTime >= startTime || currentTime < endTime
+                : currentTime >= startTime && currentTime < endTime;
 
             if (isCurrentlyActive) {
                 console.log(`⚡ Current time is INSIDE active window → Sending immediate ${command} command...`);
