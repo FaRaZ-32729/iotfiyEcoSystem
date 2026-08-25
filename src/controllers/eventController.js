@@ -173,6 +173,20 @@ const createScheduleForDevice = async ({
         status: "ACTIVE"
     });
 
+    const daysLabel = isRecurring && days.length
+        ? JSON.stringify(days.map((d) => String(d).toLowerCase()))
+        : "[one-time/today]";
+    console.log(
+        `[SCHEDULE-DEBUG][CREATE] Event UTC ${startTime}-${endTime} ` +
+            `days=${daysLabel} overnight=${overnight} ` +
+            `command=${eventCommand}` +
+            (isAc && eventCommand === "ON" && schedule.setTemperature != null
+                ? ` setTemperature=${schedule.setTemperature}`
+                : "") +
+            ` device=${deviceId} eventId=${schedule._id} ` +
+            `startCron="${startCron}" endCron="${endCron}"`
+    );
+
     const startJobId = `schedule-start-${deviceId}-${schedule._id.toString()}`;
     const endJobId = `schedule-end-${deviceId}-${schedule._id.toString()}`;
 
