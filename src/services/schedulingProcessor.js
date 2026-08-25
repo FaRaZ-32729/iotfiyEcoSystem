@@ -16,9 +16,22 @@ const processSchedulingDeviceData = async (device, payload) => {
     const previousLastUpdate = device.lastUpdateTime;
     const previousPowerW = device.espPower;
 
-    // Live sensor temperature → espTemperature (AC room temp + non-AC sensors)
-    // AC setpoint stays in setTemperature (separate from ESP room reading)
-    if (payload.temperature !== undefined) {
+    // Live sensor temperature → espTemperature
+    // AC: ESP sends DS18B20 as ventTemperature (NOT "temperature" — that is setpoint alias)
+    // Non-AC: ESP sends temperature as the sensor reading
+    if (isAc) {
+        const ventRaw =
+            payload.ventTemperature !== undefined
+                ? payload.ventTemperature
+                : payload.ventTemp;
+        if (ventRaw !== undefined) {
+            const ventTemp = Number(ventRaw);
+            if (Number.isFinite(ventTemp)) {
+                device.espTemperature = ventTemp;
+                updatedFields.push(`espTemperature(vent): ${ventTemp}`);
+            }
+        }
+    } else if (payload.temperature !== undefined) {
         device.espTemperature = payload.temperature;
         updatedFields.push(`temperature: ${payload.temperature}`);
     }
@@ -323,8 +336,10 @@ const processSchedulingDeviceData = async (device, payload) => {
                 sensorData.voltage = payload.voltage;
                 sensorData.current = payload.current;
             } else if (device.deviceType === "AC") {
-                // Setpoint + optional energy snapshot (power/current derived)
-                sensorData.temperature = device.setTemperature;
+                // Vent/room sensor (espTemperature), not AC setpoint
+                if (device.espTemperature != null) {
+                    sensorData.temperature = device.espTemperature;
+                }
                 if (device.espCurrent != null) sensorData.current = device.espCurrent;
                 if (device.espPower != null) sensorData.voltage = device.espPower; // reuse field for W if needed
             }
