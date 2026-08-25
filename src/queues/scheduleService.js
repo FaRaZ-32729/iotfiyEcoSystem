@@ -2,8 +2,82 @@
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("./scheduleQueue");
 const Device = require("../models/deviceModel");
-// const { runAcScheduledCommand } = require("../acScheduleHelper");
 const { runAcScheduledCommand } = require("../services/acScheduleHelper");
+
+/** BullMQ 5 cron instances use ids like repeat:<hash>:<ts> — not removable via job.remove() */
+const isSchedulerInstanceJob = (job) => String(job?.id || "").startsWith("repeat:");
+
+const removeQueuedJobSafe = async (job) => {
+    if (isSchedulerInstanceJob(job)) return false;
+    try {
+        await job.remove();
+        return true;
+    } catch (err) {
+        const msg = String(err?.message || "");
+        if (err?.code === -8 || /job scheduler/i.test(msg)) {
+            return false;
+        }
+        throw err;
+    }
+};
+
+/**
+ * Remove a recurring cron by our custom scheduler id (schedule-start-… / schedule-end-…).
+ * BullMQ 5+: Job Schedulers (remove via key — see bullmq docs / issue #3244).
+ * Legacy: getRepeatableJobs + removeRepeatableByKey.
+ */
+const removeSchedulerById = async (schedulerId) => {
+    const wanted = String(schedulerId || "").trim();
+    if (!wanted) return 0;
+
+    let removed = 0;
+
+    if (typeof scheduleQueue.getJobSchedulers === "function") {
+        const schedulers = await scheduleQueue.getJobSchedulers(0, -1, false);
+        for (const s of schedulers) {
+            const sid = String(s.id || "");
+            const skey = String(s.key || "");
+            const matches = sid === wanted || skey === wanted || skey.includes(wanted);
+            if (!matches) continue;
+
+            const removeId = skey || sid || wanted;
+            try {
+                const ok = await scheduleQueue.removeJobScheduler(removeId);
+                if (ok) {
+                    removed += 1;
+                    console.log(`🗑️ Removed job scheduler key=${removeId}`);
+                }
+            } catch (err) {
+                console.warn(`removeJobScheduler(${removeId}):`, err.message);
+            }
+        }
+    }
+
+    if (typeof scheduleQueue.removeJobScheduler === "function") {
+        try {
+            const ok = await scheduleQueue.removeJobScheduler(wanted);
+            if (ok) {
+                removed += 1;
+                console.log(`🗑️ Removed job scheduler id=${wanted}`);
+            }
+        } catch (err) {
+            console.warn(`removeJobScheduler(${wanted}):`, err.message);
+        }
+    }
+
+    const repeatables = await scheduleQueue.getRepeatableJobs();
+    for (const r of repeatables) {
+        const rid = String(r.id || "");
+        const rkey = String(r.key || "");
+        if (rid === wanted || rkey.includes(wanted)) {
+            await scheduleQueue.removeRepeatableByKey(rkey);
+            removed += 1;
+            console.log(`🗑️ Removed repeatable id=${rid} key=${rkey}`);
+        }
+    }
+
+    return removed;
+};
 
 const addScheduleJob = async (jobId, data, cronExpression) => {
     try {
@@ -97,26 +171,15 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
 };
 
 /**
- * BullMQ stores repeatable jobs under a generated key
- * (`repeat:<hash>:<ts>`), NOT our custom jobId
- * (`schedule-end-JO4Y3U-<eventId>`). Calling removeRepeatableByKey(jobId)
- * is a no-op — deleted events keep firing start/OFF crons.
+ * Remove start/end cron for one event by our custom jobId
+ * (`schedule-start-<deviceId>-<eventId>` / `schedule-end-…`).
  */
 const removeScheduleJob = async (jobId) => {
     if (!jobId) return;
     const wanted = String(jobId);
-    let removed = 0;
 
     try {
-        const repeatables = await scheduleQueue.getRepeatableJobs();
-        for (const r of repeatables) {
-            const rid = String(r.id || "");
-            if (rid === wanted) {
-                await scheduleQueue.removeRepeatableByKey(r.key);
-                removed += 1;
-                console.log(`🗑️ Removed repeatable id=${rid} key=${r.key}`);
-            }
-        }
+        let removed = await removeSchedulerById(wanted);
 
         const queued = await scheduleQueue.getJobs([
             "delayed",
@@ -128,9 +191,10 @@ const removeScheduleJob = async (jobId) => {
             const jid = String(job.id || "");
             const repeatId = String(job.opts?.repeat?.jobId || "");
             if (jid === wanted || repeatId === wanted) {
-                await job.remove();
-                removed += 1;
-                console.log(`🗑️ Removed queued job id=${jid}`);
+                if (await removeQueuedJobSafe(job)) {
+                    removed += 1;
+                    console.log(`🗑️ Removed queued job id=${jid}`);
+                }
             }
         }
 
@@ -139,19 +203,49 @@ const removeScheduleJob = async (jobId) => {
         }
     } catch (error) {
         console.error(`Failed to remove job ${jobId}:`, error);
+        throw error;
     }
 };
 
-/** Remove every start/end cron whose jobId or payload still points at this event. */
+/** Remove every start/end cron whose scheduler id or payload points at this event. */
 const removeJobsForEventId = async (eventId) => {
     const id = String(eventId || "").trim();
     if (!id) return;
 
     try {
+        let removed = 0;
+        const suffix = `-${id}`;
+
+        if (typeof scheduleQueue.getJobSchedulers === "function") {
+            const schedulers = await scheduleQueue.getJobSchedulers(0, -1, false);
+            for (const s of schedulers) {
+                const sid = String(s.id || "");
+                const skey = String(s.key || "");
+                const payloadEventId = String(s.template?.data?.eventId || "");
+                const matches =
+                    sid.endsWith(suffix) ||
+                    skey.includes(id) ||
+                    payloadEventId === id;
+                if (!matches) continue;
+
+                const removeId = skey || sid;
+                try {
+                    const ok = await scheduleQueue.removeJobScheduler(removeId);
+                    if (ok) {
+                        removed += 1;
+                        console.log(`🗑️ Removed job scheduler for event ${id} key=${removeId}`);
+                    }
+                } catch (err) {
+                    console.warn(`removeJobScheduler event(${id}):`, err.message);
+                }
+            }
+        }
+
         const repeatables = await scheduleQueue.getRepeatableJobs();
         for (const r of repeatables) {
             if (String(r.id || "").includes(id)) {
                 await scheduleQueue.removeRepeatableByKey(r.key);
+                removed += 1;
                 console.log(`🗑️ Removed orphan repeatable for event ${id} key=${r.key}`);
             }
         }
@@ -167,13 +261,18 @@ const removeJobsForEventId = async (eventId) => {
                 String(job.data?.eventId || "") === id ||
                 String(job.id || "").includes(id) ||
                 String(job.opts?.repeat?.jobId || "").includes(id);
-            if (matches) {
-                await job.remove();
+            if (matches && (await removeQueuedJobSafe(job))) {
+                removed += 1;
                 console.log(`🗑️ Removed orphan queued job ${job.id} for event ${id}`);
             }
         }
+
+        if (!removed) {
+            console.warn(`⚠️ No BullMQ jobs found for event ${id}`);
+        }
     } catch (error) {
         console.error(`Failed to remove jobs for event ${id}:`, error);
+        throw error;
     }
 };
 
