@@ -50,7 +50,7 @@ const connectMQTT = () => {
     client.on("message", (topic, message) => {
         const payload = message.toString();
 
-        console.log(`📥 Received on ${topic}: ${payload}`);
+        // console.log(`📥 Received on ${topic}: ${payload}`);
 
         // Handle Device Status (Online / Offline)
         if (topic.endsWith("/status")) {
@@ -72,7 +72,7 @@ const connectMQTT = () => {
         // Handle Device Data
         if (topic.endsWith("/data")) {
             const deviceId = topic.split("/")[2];
-            console.log(`📊 Data from Device ${deviceId}: ${payload}`);
+            // console.log(`📊 Data from Device ${deviceId}: ${payload}`);
             // Parse JSON if your devices send JSON
         }
     });

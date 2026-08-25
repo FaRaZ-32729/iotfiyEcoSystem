@@ -54,7 +54,7 @@ const multiDBConnections = () => {
 const getDBConnection = (deviceType) => {
     const conn = connections[deviceType];
     if (!conn) {
-        console.warn(`⚠️ No cluster configured for deviceType: ${deviceType}`);
+        // console.warn(`⚠️ No cluster configured for deviceType: ${deviceType}`);
         return null;
     }
     return conn;

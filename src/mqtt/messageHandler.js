@@ -276,7 +276,7 @@ const setupMessageHandler = (client) => {
                 const payload = JSON.parse(message.toString());
                 const deviceId = parts[2];
 
-                console.log(`\n📨 MQTT Message Received → Topic: ${topic}`);
+                // console.log(`\n📨 MQTT Message Received → Topic: ${topic}`);
 
                 // Fetch device with full details
                 const device = await Device.findOne({ deviceId });
