@@ -7,7 +7,7 @@ const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
 const TriggerSchedule = require("./src/models/triggerEventModel");
-const { runAcScheduledCommand } = require("./src/services/acScheduleHelper");
+const { runAcScheduledCommand, runAcOffEventEnd } = require("./src/services/acScheduleHelper");
 const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
@@ -101,10 +101,17 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     const isAc = device.deviceType === "AC";
     const jobType = job.data.type;
 
-    // AC OFF event: end job is no-op (window ends, nothing to restore)
+    // AC OFF event end: keep off — unlock only if still locked
     if (isAc && jobType === "end" && schedule?.command === "OFF") {
-        console.log(`⏭️ AC OFF event ended for ${deviceId} — no end command`);
-        return { skipped: true, reason: "ac_off_event_end" };
+        console.log(`🔓 AC OFF event ended for ${deviceId} — conditional unlock`);
+        const success = await runAcOffEventEnd(device, schedule, {
+            scheduleId: schedule?._id,
+            reason: `cron_worker_${jobType || "end"}`,
+        });
+        if (success) {
+            return { success: true };
+        }
+        throw new Error(`Device ${deviceId} OFF event end unlock failed`);
     }
 
     // AC start uses event command (ON or OFF); end uses OFF when event was ON

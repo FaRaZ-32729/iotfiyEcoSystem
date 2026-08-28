@@ -143,11 +143,20 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
 
     if (cmd === "OFF" && currentState === "OFF") {
         console.log(
-            `[AC-IR-DEBUG] skip IR device=${device.deviceId} reason=already_off`
+            `[AC-IR-DEBUG] skip power IR device=${device.deviceId} reason=already_off`
         );
+        // OFF schedule start: still apply lock if user left it unlocked
+        const lockOk = publishAcRemote(device.deviceId, {
+            remote: lockToRemote(true),
+            state: "off",
+            temperature: Number.isFinite(currentTemp) ? currentTemp : null,
+        });
+        if (lockOk && !device.acLocked) {
+            device.acLocked = true;
+        }
         await applyAcScheduleState(device, cmd, null);
         emitAcDeviceLive(device);
-        return true;
+        return lockOk;
     }
 
     // Already ON but wrong temp → only temp.* (avoid power.on baked-temp flash)
@@ -188,6 +197,28 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
 
     if (result?.ok) {
         await applyAcScheduleState(device, cmd, targetTemp);
+
+        // OFF schedule start: power off + auto lock (user may change lock during window)
+        if (cmd === "OFF" && !device.acLocked) {
+            const lockOk = publishAcRemote(device.deviceId, {
+                remote: lockToRemote(true),
+                state: "off",
+                temperature:
+                    Number.isFinite(Number(device.setTemperature)) ?
+                        Number(device.setTemperature) :
+                        null,
+            });
+            if (lockOk) {
+                device.acLocked = true;
+                device.lastUpdateTime = new Date();
+                await device.save();
+            } else {
+                console.warn(
+                    `AC OFF schedule lock MQTT failed for ${device.deviceId} reason=${reason}`
+                );
+            }
+        }
+
         emitAcDeviceLive(device);
         console.log(
             `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}`
@@ -203,11 +234,50 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
     return false;
 };
 
+/**
+ * OFF schedule END: keep AC off. Unlock only if still locked
+ * (event lock or user re-locked after unlocking during the window).
+ * Skip unlock if user left it unlocked during the event.
+ */
+const runAcOffEventEnd = async (device, schedule, options = {}) => {
+    const reason = options.reason || "off_event_end";
+    console.log(
+        `[AC-OFF-EVENT] end device=${device.deviceId} acLocked=${device.acLocked} ` +
+            `reason=${reason} schedule=${schedule?._id || "-"}`
+    );
+
+    device.state = "OFF";
+    device.lastUpdateTime = new Date();
+
+    if (device.acLocked) {
+        const unlockOk = publishAcRemote(device.deviceId, {
+            remote: lockToRemote(false),
+            state: "off",
+            temperature:
+                Number.isFinite(Number(device.setTemperature)) ?
+                    Number(device.setTemperature) :
+                    null,
+        });
+        if (!unlockOk) {
+            console.warn(
+                `AC OFF schedule unlock MQTT failed for ${device.deviceId} reason=${reason}`
+            );
+            return false;
+        }
+        device.acLocked = false;
+    }
+
+    await device.save();
+    emitAcDeviceLive(device);
+    return true;
+};
+
 module.exports = {
     buildAcCommandPayload,
     applyAcScheduleState,
     emitAcDeviceLive,
     runAcScheduledCommand,
+    runAcOffEventEnd,
     publishAcMqttCommand,
     publishAcLockReassert,
 };
