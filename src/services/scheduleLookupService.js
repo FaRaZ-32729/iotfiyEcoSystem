@@ -237,4 +237,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
     }
 };
 
-module.exports = { getCurrentOrNextScheduleData };
+module.exports = {
+    getCurrentOrNextScheduleData,
+    isScheduleActiveNow,
+};

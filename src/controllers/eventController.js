@@ -8,7 +8,11 @@ const scheduleQueue = require("../queues/scheduleQueue");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
 const {
     getCurrentOrNextScheduleData,
+    isScheduleActiveNow,
 } = require("../services/scheduleLookupService");
+const {
+    runAcOffEventEnd,
+} = require("../services/acScheduleHelper");
 
 /** Push CURRENT/NEXT (or NO_EVENT) to dashboard cards — does not wait for ESP status. */
 const emitDeviceScheduleUpdate = async (deviceId, reason = "schedule_mutation") => {
@@ -498,6 +502,54 @@ const getEventsByDevice = async (req, res) => {
 };
 
 // ==================== TOGGLE ACTIVE/INACTIVE (Recurring Only) ====================
+
+function scheduleUtcNow() {
+    const now = new Date();
+    const currentTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
+        now.getUTCMinutes()
+    ).padStart(2, "0")}`;
+    const currentDay = now
+        .toLocaleString("en-US", { weekday: "long", timeZone: "UTC" })
+        .toLowerCase();
+    const [h, m] = currentTime.split(":").map(Number);
+    const currentMin = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    return { now, currentDay, currentMin };
+}
+
+async function applyOffEventToggleLockSideEffects(schedule, status) {
+    if (String(schedule.command || "").toUpperCase() !== "OFF") return;
+
+    const { currentDay, currentMin } = scheduleUtcNow();
+    if (!isScheduleActiveNow(schedule, currentDay, currentMin)) {
+        console.log(
+            `[AC-OFF-EVENT] toggle ${status} event=${schedule._id} ` +
+                `device=${schedule.deviceId} — outside window, skip lock side-effect`
+        );
+        return;
+    }
+
+    const device = await Device.findOne({ deviceId: schedule.deviceId });
+    if (!device || device.deviceType !== "AC") return;
+    if (device.status !== "online") {
+        console.log(
+            `[AC-OFF-EVENT] toggle ${status} event=${schedule._id} ` +
+                `device=${schedule.deviceId} — offline, skip lock side-effect`
+        );
+        return;
+    }
+
+    if (status === "INACTIVE") {
+        console.log(
+            `[AC-OFF-EVENT] toggle INACTIVE event=${schedule._id} ` +
+                `device=${schedule.deviceId} — in window, conditional unlock`
+        );
+        await runAcOffEventEnd(device, schedule, {
+            reason: "schedule_toggled_inactive",
+        });
+    }
+    // ACTIVE + in-window OFF: reconcileMissedCommands applies OFF + lock (no duplicate here)
+}
+
 const toggleScheduleStatusForEvent = async ({ id, status }) => {
     if (!["ACTIVE", "INACTIVE"].includes(status)) {
         return {
@@ -532,6 +584,8 @@ const toggleScheduleStatusForEvent = async ({ id, status }) => {
 
     schedule.status = status;
     await schedule.save();
+
+    await applyOffEventToggleLockSideEffects(schedule, status);
 
     if (status === "ACTIVE") {
         console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
