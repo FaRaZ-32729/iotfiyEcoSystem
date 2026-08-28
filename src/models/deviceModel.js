@@ -72,6 +72,10 @@ const deviceSchema = new mongoose.Schema({
         default: "Low"
     },
     acLocked: { type: Boolean, default: false },
+    /** CURRENT event id when ESP confirmed schedule start (calendar green). Cleared on event end. */
+    scheduleStartDeliveredEventId: { type: String, default: null },
+    /** CURRENT event id waiting for ESP apply ack after schedule start command sent. */
+    scheduleStartPendingEventId: { type: String, default: null },
     acHealthAlert: { type: Boolean, default: false },
     /** When true: show AC health alerts. When false: show live ESP room temperature instead. */
     acHealthMonitoringIncluded: { type: Boolean, default: false },

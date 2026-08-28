@@ -1,4 +1,5 @@
 const { getCurrentOrNextScheduleData } = require("../controllers/eventController");
+const { buildScheduleSocketPayload } = require("../services/scheduleEmitHelper");
 const { activeOTASessions } = require("../controllers/otaController");
 const { getCurrentOrNextTriggerEventData } = require("../controllers/triggerEventController");
 const Device = require("../models/deviceModel");
@@ -174,13 +175,14 @@ const setupMessageHandler = (client) => {
                     }
 
                     if (eventData && global.io) {
-                        global.io.emit(`device/${deviceId}/schedule`, {
-                            ...eventData,
+                        const schedulePayload = await buildScheduleSocketPayload(deviceId, {
                             deviceStatus: newStatus,
-                            message: newStatus === "offline"
-                                ? "Device is currently offline. Showing last known event."
-                                : undefined
+                            message:
+                                newStatus === "offline"
+                                    ? "Device is currently offline. Showing last known event."
+                                    : undefined,
                         });
+                        global.io.emit(`device/${deviceId}/schedule`, schedulePayload);
 
                         console.log(
                             `[SCHEDULE-DEBUG][MQTT-STATUS] emit schedule device=${deviceId} ` +

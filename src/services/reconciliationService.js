@@ -106,6 +106,8 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
                 scheduleId: activeSchedule._id,
                 durationSeconds: eventCommand === "ON" ? durationSeconds : null,
                 reason: `reconcile:${reason}`,
+                isScheduleStart: true,
+                scheduleEventId: activeSchedule._id.toString(),
             });
             return;
         }

@@ -8,6 +8,8 @@ const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
 const TriggerSchedule = require("./src/models/triggerEventModel");
 const { runAcScheduledCommand, runAcOffEventEnd } = require("./src/services/acScheduleHelper");
+const { clearScheduleStartDelivery } = require("./src/services/acScheduleStartDelivery");
+const { emitDeviceScheduleUpdate } = require("./src/services/scheduleEmitHelper");
 const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
@@ -101,6 +103,11 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
     const isAc = device.deviceType === "AC";
     const jobType = job.data.type;
 
+    if (device.category === "scheduling" && jobType === "end") {
+        await clearScheduleStartDelivery(deviceId, "cron_worker_end");
+        await emitDeviceScheduleUpdate(deviceId, "event_end");
+    }
+
     // AC OFF event end: keep off — unlock only if still locked
     if (isAc && jobType === "end" && schedule?.command === "OFF") {
         console.log(`🔓 AC OFF event ended for ${deviceId} — conditional unlock`);
@@ -160,6 +167,8 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
             durationSeconds,
             scheduleId: schedule?._id,
             reason: `cron_worker_${jobType || "unknown"}`,
+            isScheduleStart: jobType === "start",
+            scheduleEventId: eventId,
         });
 
         if (success) {

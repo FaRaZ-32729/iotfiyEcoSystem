@@ -1,6 +1,10 @@
 // src/services/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 const sensorModel = require("../models/sensorModel");
+const {
+    tryConfirmScheduleStartFromEsp,
+} = require("./acScheduleStartDelivery");
+const { emitDeviceScheduleUpdate } = require("./scheduleEmitHelper");
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
 const VALID_FAN_SPEEDS = ["Low", "Medium", "High", "Ultra", "Turbo"];
@@ -388,6 +392,16 @@ const processSchedulingDeviceData = async (device, payload) => {
         console.log(`📤 Live data sent to frontend for device: ${device.deviceId}`);
     } else {
         console.warn(`⚠️ Socket.io not initialized - cannot send live data`);
+    }
+
+    if (isAc) {
+        const source = String(payload.source || "").toLowerCase().trim();
+        if (source === "apply") {
+            const confirmed = await tryConfirmScheduleStartFromEsp(device.deviceId);
+            if (confirmed) {
+                await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
+            }
+        }
     }
 
     console.log(`✅ Scheduling data processing completed for ${device.deviceId}\n`);

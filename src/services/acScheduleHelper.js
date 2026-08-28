@@ -9,6 +9,23 @@ const {
     stateToAckit,
     lockToRemote,
 } = require("../mqtt/acKitCommandMap");
+const {
+    markScheduleStartPending,
+    markScheduleStartDelivered,
+} = require("./acScheduleStartDelivery");
+const { emitDeviceScheduleUpdate } = require("./scheduleEmitHelper");
+
+async function finishScheduleStartDelivery(deviceId, options, espTransmitted) {
+    if (!options.isScheduleStart || !options.scheduleEventId) return;
+
+    const eventId = String(options.scheduleEventId);
+    if (espTransmitted) {
+        await markScheduleStartPending(deviceId, eventId);
+    } else {
+        await markScheduleStartDelivered(deviceId, eventId, "no_ir_tx");
+    }
+    await emitDeviceScheduleUpdate(deviceId, "schedule_start_command");
+}
 
 /**
  * Legacy Haier-shaped payload builder — kept for any non-MQTT callers/logging.
@@ -174,6 +191,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         );
         await applyAcScheduleState(device, cmd, targetTemp);
         emitAcDeviceLive(device);
+        await finishScheduleStartDelivery(device.deviceId, options, false);
         return true;
     }
 
@@ -184,6 +202,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         await applyOffEventStartLock(device, reason);
         await applyAcScheduleState(device, cmd, null);
         emitAcDeviceLive(device);
+        await finishScheduleStartDelivery(device.deviceId, options, false);
         return true;
     }
 
@@ -211,6 +230,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             console.log(
                 `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason} mode=temp_only`
             );
+            await finishScheduleStartDelivery(device.deviceId, options, true);
             return true;
         }
         console.warn(
@@ -235,6 +255,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}` +
                 (cmd === "OFF" ? ` acLocked=${device.acLocked}` : "")
         );
+        await finishScheduleStartDelivery(device.deviceId, options, true);
         return true;
     }
 
