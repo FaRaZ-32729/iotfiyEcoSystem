@@ -8,7 +8,6 @@ const scheduleQueue = require("../queues/scheduleQueue");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
 const {
     getCurrentOrNextScheduleData,
-    isScheduleActiveNow,
 } = require("../services/scheduleLookupService");
 const {
     runAcOffEventEnd,
@@ -503,51 +502,72 @@ const getEventsByDevice = async (req, res) => {
 
 // ==================== TOGGLE ACTIVE/INACTIVE (Recurring Only) ====================
 
-function scheduleUtcNow() {
-    const now = new Date();
-    const currentTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
-        now.getUTCMinutes()
-    ).padStart(2, "0")}`;
-    const currentDay = now
-        .toLocaleString("en-US", { weekday: "long", timeZone: "UTC" })
-        .toLowerCase();
-    const [h, m] = currentTime.split(":").map(Number);
-    const currentMin = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-    return { now, currentDay, currentMin };
-}
+async function applyOffEventUnlockBeforeDisable(schedule) {
+    const eventId = String(schedule._id);
+    const deviceId = schedule.deviceId;
+    const command = String(schedule.command || "").toUpperCase();
 
-async function applyOffEventToggleLockSideEffects(schedule, status) {
-    if (String(schedule.command || "").toUpperCase() !== "OFF") return;
+    console.log(
+        `[AC-OFF-EVENT] toggle INACTIVE pre-save event=${eventId} device=${deviceId} ` +
+            `command=${command || "(empty)"} status=${schedule.status}`
+    );
 
-    const { currentDay, currentMin } = scheduleUtcNow();
-    if (!isScheduleActiveNow(schedule, currentDay, currentMin)) {
+    if (command !== "OFF") {
         console.log(
-            `[AC-OFF-EVENT] toggle ${status} event=${schedule._id} ` +
-                `device=${schedule.deviceId} — outside window, skip lock side-effect`
+            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — not an OFF event (command=${command || "missing"})`
         );
         return;
     }
 
-    const device = await Device.findOne({ deviceId: schedule.deviceId });
-    if (!device || device.deviceType !== "AC") return;
+    if (schedule.status !== "ACTIVE") {
+        console.log(
+            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — schedule already ${schedule.status}`
+        );
+        return;
+    }
+
+    // Same lookup the device card uses — must run BEFORE status is saved INACTIVE
+    const live = await getCurrentOrNextScheduleData(deviceId);
+    const isCurrent =
+        live?.type === "CURRENT" && String(live?.event?._id) === eventId;
+
+    console.log(
+        `[AC-OFF-EVENT] toggle INACTIVE pre-save liveType=${live?.type || "none"} ` +
+            `liveEventId=${live?.event?._id || "none"} isCurrent=${isCurrent}`
+    );
+
+    if (!isCurrent) {
+        console.log(
+            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — event not CURRENT on device card`
+        );
+        return;
+    }
+
+    const device = await Device.findOne({ deviceId });
+    if (!device) {
+        console.log(`[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} not found`);
+        return;
+    }
+    if (device.deviceType !== "AC") {
+        console.log(
+            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} type=${device.deviceType}`
+        );
+        return;
+    }
     if (device.status !== "online") {
         console.log(
-            `[AC-OFF-EVENT] toggle ${status} event=${schedule._id} ` +
-                `device=${schedule.deviceId} — offline, skip lock side-effect`
+            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} offline`
         );
         return;
     }
 
-    if (status === "INACTIVE") {
-        console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE event=${schedule._id} ` +
-                `device=${schedule.deviceId} — in window, conditional unlock`
-        );
-        await runAcOffEventEnd(device, schedule, {
-            reason: "schedule_toggled_inactive",
-        });
-    }
-    // ACTIVE + in-window OFF: reconcileMissedCommands applies OFF + lock (no duplicate here)
+    console.log(
+        `[AC-OFF-EVENT] toggle INACTIVE event=${eventId} device=${deviceId} ` +
+            `— CURRENT OFF event, conditional unlock`
+    );
+    await runAcOffEventEnd(device, schedule, {
+        reason: "schedule_toggled_inactive",
+    });
 }
 
 const toggleScheduleStatusForEvent = async ({ id, status }) => {
@@ -582,10 +602,19 @@ const toggleScheduleStatusForEvent = async ({ id, status }) => {
         };
     }
 
+    console.log(
+        `[AC-OFF-EVENT] toggle entry id=${id} device=${schedule.deviceId} ` +
+            `nextStatus=${status} command=${schedule.command || "(empty)"} ` +
+            `window=${schedule.startTime}-${schedule.endTime}`
+    );
+
+    // Unlock BEFORE save so getCurrentOrNextScheduleData still sees this event as ACTIVE + CURRENT
+    if (status === "INACTIVE") {
+        await applyOffEventUnlockBeforeDisable(schedule);
+    }
+
     schedule.status = status;
     await schedule.save();
-
-    await applyOffEventToggleLockSideEffects(schedule, status);
 
     if (status === "ACTIVE") {
         console.log(`🔄 Schedule activated → Running reconciliation for device ${schedule.deviceId}`);
