@@ -506,67 +506,69 @@ const getCurrentOrNextScheduleForDevice = async (req, res) => {
 
 // ==================== TOGGLE ACTIVE/INACTIVE (Recurring Only) ====================
 
-async function applyOffEventUnlockBeforeDisable(schedule) {
+async function applyOffEventUnlockBeforeDisable(schedule, options = {}) {
+    const action = options.action || "toggle INACTIVE";
+    const unlockReason = options.reason || "schedule_toggled_inactive";
     const eventId = String(schedule._id);
     const deviceId = schedule.deviceId;
     const command = String(schedule.command || "").toUpperCase();
 
     console.log(
-        `[AC-OFF-EVENT] toggle INACTIVE pre-save event=${eventId} device=${deviceId} ` +
+        `[AC-OFF-EVENT] ${action} pre-save event=${eventId} device=${deviceId} ` +
             `command=${command || "(empty)"} status=${schedule.status}`
     );
 
     if (command !== "OFF") {
         console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — not an OFF event (command=${command || "missing"})`
+            `[AC-OFF-EVENT] ${action} skip unlock — not an OFF event (command=${command || "missing"})`
         );
         return;
     }
 
     if (schedule.status !== "ACTIVE") {
         console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — schedule already ${schedule.status}`
+            `[AC-OFF-EVENT] ${action} skip unlock — schedule already ${schedule.status}`
         );
         return;
     }
 
-    // Same lookup the device card uses — must run BEFORE status is saved INACTIVE
+    // Same lookup the device card uses — must run BEFORE event is removed or saved INACTIVE
     const live = await getCurrentOrNextScheduleData(deviceId);
     const isCurrent =
         live?.type === "CURRENT" && String(live?.event?._id) === eventId;
 
     console.log(
-        `[AC-OFF-EVENT] toggle INACTIVE pre-save liveType=${live?.type || "none"} ` +
+        `[AC-OFF-EVENT] ${action} pre-save liveType=${live?.type || "none"} ` +
             `liveEventId=${live?.event?._id || "none"} isCurrent=${isCurrent}`
     );
 
     if (!isCurrent) {
         console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — event not CURRENT on device card`
+            `[AC-OFF-EVENT] ${action} skip unlock — event not CURRENT on device card`
         );
         return;
     }
 
     const device = await Device.findOne({ deviceId });
     if (!device) {
-        console.log(`[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} not found`);
+        console.log(`[AC-OFF-EVENT] ${action} skip unlock — device ${deviceId} not found`);
         return;
     }
     if (device.deviceType !== "AC") {
         console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} type=${device.deviceType}`
+            `[AC-OFF-EVENT] ${action} skip unlock — device ${deviceId} type=${device.deviceType}`
         );
         return;
     }
     if (device.status !== "online") {
         console.log(
-            `[AC-OFF-EVENT] toggle INACTIVE skip unlock — device ${deviceId} offline`
+            `[AC-OFF-EVENT] ${action} skip unlock — device ${deviceId} offline`
         );
         return;
     }
 
     console.log(
-        `[AC-OFF-EVENT] toggle INACTIVE event=${eventId} device=${deviceId} ` +
+        `[AC-OFF-EVENT] ${action} event=${eventId} device=${deviceId} ` +
             `— CURRENT OFF event, conditional unlock`
     );
     await runAcOffEventEnd(device, schedule, {
@@ -668,6 +670,12 @@ const deleteScheduleForEvent = async ({ id }) => {
 
     const startJobId = `schedule-start-${schedule.deviceId}-${schedule._id}`;
     const endJobId = `schedule-end-${schedule.deviceId}-${schedule._id}`;
+
+    // Unlock BEFORE delete so getCurrentOrNextScheduleData still sees ACTIVE + CURRENT
+    await applyOffEventUnlockBeforeDisable(schedule, {
+        action: "delete",
+        reason: "event_delete",
+    });
 
     await removeScheduleJob(startJobId);
     await removeScheduleJob(endJobId);
