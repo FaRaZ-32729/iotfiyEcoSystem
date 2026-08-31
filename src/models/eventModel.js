@@ -35,6 +35,12 @@ const eventSchema = new mongoose.Schema({
         default: null
     },
 
+    /** AC ON events only: optional remote lock for the event window */
+    applyLock: {
+        type: Boolean,
+        default: false
+    },
+
     status: {
         type: String,
         enum: ["ACTIVE", "INACTIVE"],

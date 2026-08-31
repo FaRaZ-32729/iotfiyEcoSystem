@@ -11,6 +11,9 @@ const {
 } = require("../services/scheduleLookupService");
 const {
     runAcOffEventEnd,
+    runAcConditionalUnlockAtEventEnd,
+    eventUsesLock,
+    emitAcDeviceLive,
 } = require("../services/acScheduleHelper");
 
 const {
@@ -40,6 +43,7 @@ const createScheduleForDevice = async ({
     days = [],
     command = "ON",
     setTemperature,
+    applyLock = false,
 }) => {
     if (!deviceId || !startTime || !endTime) {
         return {
@@ -172,6 +176,7 @@ const createScheduleForDevice = async ({
         days: isRecurring ? days : [],
         command: eventCommand,
         setTemperature: isAc && eventCommand === "ON" ? Number(setTemperature) : null,
+        applyLock: isAc && eventCommand === "ON" ? applyLock === true : false,
         isOvernight: overnight,
         isRecurring,
         startCron,
@@ -189,6 +194,9 @@ const createScheduleForDevice = async ({
             `command=${eventCommand}` +
             (isAc && eventCommand === "ON" && schedule.setTemperature != null
                 ? ` setTemperature=${schedule.setTemperature}`
+                : "") +
+            (isAc && eventCommand === "ON" && schedule.applyLock
+                ? " applyLock=true"
                 : "") +
             ` device=${deviceId} eventId=${schedule._id} ` +
             `startCron="${startCron}" endCron="${endCron}"`
@@ -260,7 +268,7 @@ const createScheduleForDevice = async ({
 
 const createSchedule = async (req, res) => {
     try {
-        const { deviceId, startTime, endTime, days = [], command = "ON", setTemperature } = req.body;
+        const { deviceId, startTime, endTime, days = [], command = "ON", setTemperature, applyLock } = req.body;
 
         const result = await createScheduleForDevice({
             user: req.user,
@@ -270,6 +278,7 @@ const createSchedule = async (req, res) => {
             days,
             command,
             setTemperature,
+            applyLock,
         });
 
         return res.status(result.status).json(result.body);
@@ -518,9 +527,10 @@ async function applyOffEventUnlockBeforeDisable(schedule, options = {}) {
             `command=${command || "(empty)"} status=${schedule.status}`
     );
 
-    if (command !== "OFF") {
+    if (!eventUsesLock(schedule)) {
         console.log(
-            `[AC-OFF-EVENT] ${action} skip unlock — not an OFF event (command=${command || "missing"})`
+            `[AC-OFF-EVENT] ${action} skip unlock — event does not use lock ` +
+                `(command=${command || "missing"} applyLock=${schedule.applyLock === true})`
         );
         return;
     }
@@ -569,11 +579,21 @@ async function applyOffEventUnlockBeforeDisable(schedule, options = {}) {
 
     console.log(
         `[AC-OFF-EVENT] ${action} event=${eventId} device=${deviceId} ` +
-            `— CURRENT OFF event, conditional unlock`
+            `— CURRENT locked event, conditional unlock`
     );
-    await runAcOffEventEnd(device, schedule, {
-        reason: "schedule_toggled_inactive",
+
+    if (command === "OFF") {
+        await runAcOffEventEnd(device, schedule, { reason: unlockReason });
+        return;
+    }
+
+    const unlocked = await runAcConditionalUnlockAtEventEnd(device, schedule, {
+        reason: unlockReason,
     });
+    if (unlocked) {
+        await device.save();
+        emitAcDeviceLive(device);
+    }
 }
 
 const toggleScheduleStatusForEvent = async ({ id, status }) => {

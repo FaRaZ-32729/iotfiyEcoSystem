@@ -117,28 +117,41 @@ const publishAcLockReassert = async (device) => {
 };
 
 /**
- * OFF schedule START: apply remote lock + persist acLocked.
- * Skips MQTT if already locked; logs clearly for worker debugging.
+ * OFF events always lock; ON events lock only when applyLock is true.
  */
-async function applyOffEventStartLock(device, reason = "unknown") {
+function eventUsesLock(schedule) {
+    if (!schedule) return false;
+    const cmd = String(schedule.command || "ON").toUpperCase();
+    if (cmd === "OFF") return true;
+    return cmd === "ON" && schedule.applyLock === true;
+}
+
+/**
+ * Schedule START: apply remote lock + persist acLocked when eventUsesLock.
+ */
+async function applyAcEventStartLock(device, schedule, reason = "unknown") {
+    if (!eventUsesLock(schedule)) return true;
+
     if (device.acLocked) {
         console.log(
-            `[AC-OFF-EVENT] start device=${device.deviceId} ` +
+            `[AC-EVENT-LOCK] start device=${device.deviceId} ` +
                 `skip lock MQTT — already acLocked=true reason=${reason}`
         );
         return true;
     }
 
+    const cmd = String(schedule?.command || "OFF").toUpperCase();
+    const lockState = cmd === "ON" ? "on" : "off";
     const temp = Number(device.setTemperature);
     const lockOk = publishAcRemote(device.deviceId, {
         remote: lockToRemote(true),
-        state: "off",
+        state: lockState,
         temperature: Number.isFinite(temp) ? temp : null,
     });
 
     if (!lockOk) {
         console.warn(
-            `[AC-OFF-EVENT] start device=${device.deviceId} lock MQTT FAILED reason=${reason}`
+            `[AC-EVENT-LOCK] start device=${device.deviceId} lock MQTT FAILED reason=${reason}`
         );
         return false;
     }
@@ -147,9 +160,17 @@ async function applyOffEventStartLock(device, reason = "unknown") {
     device.lastUpdateTime = new Date();
     await device.save();
     console.log(
-        `[AC-OFF-EVENT] start device=${device.deviceId} lock applied acLocked=true reason=${reason}`
+        `[AC-EVENT-LOCK] start device=${device.deviceId} lock applied acLocked=true ` +
+            `state=${lockState} reason=${reason}`
     );
     return true;
+}
+
+async function maybeApplyEventStartLock(device, schedule, command, reason) {
+    const cmd = String(command || "").toUpperCase();
+    if ((cmd === "OFF" || cmd === "ON") && eventUsesLock(schedule)) {
+        await applyAcEventStartLock(device, schedule, reason);
+    }
 }
 
 const runAcScheduledCommand = async (device, schedule, command, options = {}) => {
@@ -199,6 +220,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
                 `reason=already_on_matching_temp_${targetTemp} (no power.on)`
         );
         await applyAcScheduleState(device, cmd, targetTemp);
+        await maybeApplyEventStartLock(device, schedule, cmd, reason);
         emitAcDeviceLive(device);
         await finishScheduleStartDelivery(device.deviceId, options, {
             immediate: true,
@@ -210,7 +232,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         console.log(
             `[AC-IR-DEBUG] skip power IR device=${device.deviceId} reason=already_off`
         );
-        await applyOffEventStartLock(device, reason);
+        await maybeApplyEventStartLock(device, schedule, cmd, reason);
         await applyAcScheduleState(device, cmd, null);
         emitAcDeviceLive(device);
         await finishScheduleStartDelivery(device.deviceId, options, {
@@ -245,6 +267,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         });
         if (result?.ok) {
             await applyAcScheduleState(device, cmd, targetTemp);
+            await maybeApplyEventStartLock(device, schedule, cmd, reason);
             emitAcDeviceLive(device);
             console.log(
                 `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason} mode=temp_only`
@@ -270,15 +293,12 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
 
     if (result?.ok) {
         await applyAcScheduleState(device, cmd, targetTemp);
-
-        if (cmd === "OFF") {
-            await applyOffEventStartLock(device, reason);
-        }
+        await maybeApplyEventStartLock(device, schedule, cmd, reason);
 
         emitAcDeviceLive(device);
         console.log(
             `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}` +
-                (cmd === "OFF" ? ` acLocked=${device.acLocked}` : "")
+                (eventUsesLock(schedule) ? ` acLocked=${device.acLocked}` : "")
         );
         await finishScheduleStartDelivery(device.deviceId, options);
         return true;
@@ -296,44 +316,68 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
 };
 
 /**
- * OFF schedule END: keep AC off. Unlock only if still locked
- * (event lock or user re-locked after unlocking during the window).
- * Skip unlock if user left it unlocked during the event.
+ * Event END: conditional unlock when event used lock.
+ * Skip if user already unlocked during the window.
+ */
+async function runAcConditionalUnlockAtEventEnd(device, schedule, options = {}) {
+    const reason = options.reason || "event_lock_end";
+
+    if (!eventUsesLock(schedule)) {
+        return true;
+    }
+
+    console.log(
+        `[AC-EVENT-LOCK] end device=${device.deviceId} acLocked=${device.acLocked} ` +
+            `reason=${reason} schedule=${schedule?._id || "-"}`
+    );
+
+    if (!device.acLocked) {
+        console.log(
+            `[AC-EVENT-LOCK] end device=${device.deviceId} skip unlock — ` +
+                `user left acLocked=false reason=${reason}`
+        );
+        return true;
+    }
+
+    const unlockOk = publishAcRemote(device.deviceId, {
+        remote: lockToRemote(false),
+        state: stateToAckit(device.state) || "off",
+        temperature:
+            Number.isFinite(Number(device.setTemperature)) ?
+                Number(device.setTemperature) :
+                null,
+    });
+    if (!unlockOk) {
+        console.warn(
+            `[AC-EVENT-LOCK] end device=${device.deviceId} unlock MQTT FAILED reason=${reason}`
+        );
+        return false;
+    }
+
+    device.acLocked = false;
+    device.lastUpdateTime = new Date();
+    console.log(
+        `[AC-EVENT-LOCK] end device=${device.deviceId} unlock applied acLocked=false reason=${reason}`
+    );
+    return true;
+}
+
+/**
+ * OFF schedule END: keep AC off + conditional unlock when event used lock.
  */
 const runAcOffEventEnd = async (device, schedule, options = {}) => {
     const reason = options.reason || "off_event_end";
     console.log(
-        `[AC-OFF-EVENT] end device=${device.deviceId} acLocked=${device.acLocked} ` +
-            `reason=${reason} schedule=${schedule?._id || "-"}`
+        `[AC-OFF-EVENT] end device=${device.deviceId} reason=${reason} schedule=${schedule?._id || "-"}`
     );
 
     device.state = "OFF";
     device.lastUpdateTime = new Date();
 
-    if (device.acLocked) {
-        const unlockOk = publishAcRemote(device.deviceId, {
-            remote: lockToRemote(false),
-            state: "off",
-            temperature:
-                Number.isFinite(Number(device.setTemperature)) ?
-                    Number(device.setTemperature) :
-                    null,
-        });
-        if (!unlockOk) {
-            console.warn(
-                `[AC-OFF-EVENT] end device=${device.deviceId} unlock MQTT FAILED reason=${reason}`
-            );
-            return false;
-        }
-        device.acLocked = false;
-        console.log(
-            `[AC-OFF-EVENT] end device=${device.deviceId} unlock applied acLocked=false reason=${reason}`
-        );
-    } else {
-        console.log(
-            `[AC-OFF-EVENT] end device=${device.deviceId} skip unlock — user left acLocked=false reason=${reason}`
-        );
-    }
+    const unlocked = await runAcConditionalUnlockAtEventEnd(device, schedule, {
+        reason,
+    });
+    if (!unlocked) return false;
 
     await device.save();
     emitAcDeviceLive(device);
@@ -346,6 +390,8 @@ module.exports = {
     emitAcDeviceLive,
     runAcScheduledCommand,
     runAcOffEventEnd,
+    runAcConditionalUnlockAtEventEnd,
+    eventUsesLock,
     publishAcMqttCommand,
     publishAcLockReassert,
 };

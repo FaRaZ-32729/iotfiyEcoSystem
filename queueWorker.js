@@ -7,7 +7,7 @@ const Event = require("./src/models/eventModel");
 const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
 const TriggerSchedule = require("./src/models/triggerEventModel");
-const { runAcScheduledCommand, runAcOffEventEnd } = require("./src/services/acScheduleHelper");
+const { runAcScheduledCommand, runAcOffEventEnd, runAcConditionalUnlockAtEventEnd, eventUsesLock, emitAcDeviceLive } = require("./src/services/acScheduleHelper");
 const { clearScheduleStartDelivery } = require("./src/services/acScheduleStartDelivery");
 const { emitDeviceScheduleUpdate } = require("./src/services/scheduleEmitHelper");
 const env = require("dotenv").config();
@@ -108,7 +108,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         await emitDeviceScheduleUpdate(deviceId, "event_end");
     }
 
-    // AC OFF event end: keep off — unlock only if still locked
+    // AC OFF event end: keep off — conditional unlock
     if (isAc && jobType === "end" && schedule?.command === "OFF") {
         console.log(`🔓 AC OFF event ended for ${deviceId} — conditional unlock`);
         const success = await runAcOffEventEnd(device, schedule, {
@@ -172,6 +172,23 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
         });
 
         if (success) {
+            if (
+                jobType === "end" &&
+                schedule?.command === "ON" &&
+                eventUsesLock(schedule)
+            ) {
+                const unlockOk = await runAcConditionalUnlockAtEventEnd(
+                    device,
+                    schedule,
+                    { reason: `cron_worker_${jobType || "end"}` }
+                );
+                if (unlockOk) {
+                    await device.save();
+                    emitAcDeviceLive(device);
+                } else {
+                    throw new Error(`Device ${deviceId} ON event end unlock failed`);
+                }
+            }
             console.log(`✅ AC command "${effectiveCommand}" sent to ${deviceId}`);
             return { success: true };
         }

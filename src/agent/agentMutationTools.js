@@ -2202,6 +2202,7 @@ async function createEvent(user, args = {}) {
         days,
         command,
         setTemperature: args.setTemperature,
+        applyLock: args.applyLock === true,
     });
 
     if (!result.ok) {
@@ -3181,6 +3182,11 @@ const MUTATION_AGENT_TOOLS = [
                     setTemperature: {
                         type: "number",
                         description: "AC scheduling only. Ignored for trigger devices.",
+                    },
+                    applyLock: {
+                        type: "boolean",
+                        description:
+                            "AC ON scheduling only. Optional remote lock for the event window. OFF events always lock.",
                     },
                 },
                 required: ["startTime"],
