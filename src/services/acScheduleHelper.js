@@ -12,16 +12,15 @@ const {
 const {
     markScheduleStartPending,
     markScheduleStartDelivered,
+    clearScheduleStartDelivery,
 } = require("./acScheduleStartDelivery");
 const { emitDeviceScheduleUpdate } = require("./scheduleEmitHelper");
 
-async function finishScheduleStartDelivery(deviceId, options, espTransmitted) {
+async function finishScheduleStartDelivery(deviceId, options, { immediate = false } = {}) {
     if (!options.isScheduleStart || !options.scheduleEventId) return;
 
     const eventId = String(options.scheduleEventId);
-    if (espTransmitted) {
-        await markScheduleStartPending(deviceId, eventId);
-    } else {
+    if (immediate) {
         await markScheduleStartDelivered(deviceId, eventId, "no_ir_tx");
     }
     await emitDeviceScheduleUpdate(deviceId, "schedule_start_command");
@@ -154,6 +153,16 @@ async function applyOffEventStartLock(device, reason = "unknown") {
 }
 
 const runAcScheduledCommand = async (device, schedule, command, options = {}) => {
+    const trackingStart =
+        options.isScheduleStart === true && !!options.scheduleEventId;
+
+    if (trackingStart) {
+        await markScheduleStartPending(
+            device.deviceId,
+            options.scheduleEventId
+        );
+    }
+
     const setTemperature =
         command === "ON" && schedule?.setTemperature != null
             ? schedule.setTemperature
@@ -191,7 +200,9 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         );
         await applyAcScheduleState(device, cmd, targetTemp);
         emitAcDeviceLive(device);
-        await finishScheduleStartDelivery(device.deviceId, options, false);
+        await finishScheduleStartDelivery(device.deviceId, options, {
+            immediate: true,
+        });
         return true;
     }
 
@@ -202,7 +213,9 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         await applyOffEventStartLock(device, reason);
         await applyAcScheduleState(device, cmd, null);
         emitAcDeviceLive(device);
-        await finishScheduleStartDelivery(device.deviceId, options, false);
+        await finishScheduleStartDelivery(device.deviceId, options, {
+            immediate: true,
+        });
         return true;
     }
 
@@ -218,6 +231,12 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
                 `AC schedule invalid temp for ${device.deviceId}:`,
                 targetTemp
             );
+            if (trackingStart) {
+                await clearScheduleStartDelivery(
+                    device.deviceId,
+                    "schedule_start_failed"
+                );
+            }
             return false;
         }
         const result = await publishAcApplyFromBrand(device, key, {
@@ -230,7 +249,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             console.log(
                 `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason} mode=temp_only`
             );
-            await finishScheduleStartDelivery(device.deviceId, options, true);
+            await finishScheduleStartDelivery(device.deviceId, options);
             return true;
         }
         console.warn(
@@ -238,6 +257,12 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             result?.message || "unknown",
             `reason=${reason}`
         );
+        if (trackingStart) {
+            await clearScheduleStartDelivery(
+                device.deviceId,
+                "schedule_start_failed"
+            );
+        }
         return false;
     }
 
@@ -255,7 +280,7 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             `[AC-IR-DEBUG] IR publish OK device=${device.deviceId} reason=${reason}` +
                 (cmd === "OFF" ? ` acLocked=${device.acLocked}` : "")
         );
-        await finishScheduleStartDelivery(device.deviceId, options, true);
+        await finishScheduleStartDelivery(device.deviceId, options);
         return true;
     }
 
@@ -264,6 +289,9 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
         result?.message || "unknown",
         `reason=${reason}`
     );
+    if (trackingStart) {
+        await clearScheduleStartDelivery(device.deviceId, "schedule_start_failed");
+    }
     return false;
 };
 

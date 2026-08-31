@@ -1,9 +1,11 @@
 /**
  * Tracks whether a schedule START command was confirmed by ESP (source:"apply").
- * Persisted on Device so worker + API server processes share state.
+ * Persisted on Device so worker + API server proces5ses share state.
  * Manual toggles must NOT call markScheduleStartPending.
  */
 const Device = require("../models/deviceModel");
+const { getCurrentOrNextScheduleData } = require("./scheduleLookupService");
+const { isWithinAcCommandCooldown } = require("../mqtt/acCommandCooldown");
 
 function normalizeDeviceId(deviceId) {
     return String(deviceId || "").trim().toUpperCase();
@@ -64,11 +66,34 @@ async function tryConfirmScheduleStartFromEsp(deviceId) {
     const device = await Device.findOne({ deviceId: id })
         .select("scheduleStartPendingEventId scheduleStartDeliveredEventId")
         .lean();
-    if (!device?.scheduleStartPendingEventId) return null;
 
-    const eventId = String(device.scheduleStartPendingEventId);
-    await markScheduleStartDelivered(id, eventId, "esp_apply");
-    return { eventId };
+    if (device?.scheduleStartPendingEventId) {
+        const eventId = String(device.scheduleStartPendingEventId);
+        await markScheduleStartDelivered(id, eventId, "esp_apply");
+        return { eventId };
+    }
+
+    const live = await getCurrentOrNextScheduleData(id);
+    if (live?.type !== "CURRENT" || !live?.event?._id) return null;
+
+    const currentEventId = String(live.event._id);
+    if (
+        device?.scheduleStartDeliveredEventId != null &&
+        String(device.scheduleStartDeliveredEventId) === currentEventId
+    ) {
+        return { eventId: currentEventId };
+    }
+
+    // ESP apply can arrive before worker finishes writing pending (cross-process race)
+    if (
+        device?.scheduleStartPendingEventId == null &&
+        isWithinAcCommandCooldown(id)
+    ) {
+        await markScheduleStartDelivered(id, currentEventId, "esp_apply_race_recover");
+        return { eventId: currentEventId };
+    }
+
+    return null;
 }
 
 async function getScheduleDeliveryFlags(deviceId, eventData) {

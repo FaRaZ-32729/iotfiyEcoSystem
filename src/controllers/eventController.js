@@ -13,7 +13,10 @@ const {
     runAcOffEventEnd,
 } = require("../services/acScheduleHelper");
 
-const { emitDeviceScheduleUpdate } = require("../services/scheduleEmitHelper");
+const {
+    emitDeviceScheduleUpdate,
+    buildScheduleSocketPayload,
+} = require("../services/scheduleEmitHelper");
 const { clearScheduleStartDelivery } = require("../services/acScheduleStartDelivery");
 
 /**
@@ -486,6 +489,21 @@ const getEventsByDevice = async (req, res) => {
     }
 };
 
+const getCurrentOrNextScheduleForDevice = async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        if (!deviceId) {
+            return res.status(400).json({ success: false, message: "deviceId is required" });
+        }
+
+        const payload = await buildScheduleSocketPayload(deviceId);
+        return res.json(payload);
+    } catch (error) {
+        console.error("Get Current/Next Schedule Error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ==================== TOGGLE ACTIVE/INACTIVE (Recurring Only) ====================
 
 async function applyOffEventUnlockBeforeDisable(schedule) {
@@ -688,6 +706,7 @@ module.exports = {
     createScheduleForDevice,
     manualToggle,
     getEventsByDevice,
+    getCurrentOrNextScheduleForDevice,
     toggleScheduleStatus,
     toggleScheduleStatusForEvent,
     deleteSchedule,

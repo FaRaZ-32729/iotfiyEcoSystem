@@ -397,10 +397,8 @@ const processSchedulingDeviceData = async (device, payload) => {
     if (isAc) {
         const source = String(payload.source || "").toLowerCase().trim();
         if (source === "apply") {
-            const confirmed = await tryConfirmScheduleStartFromEsp(device.deviceId);
-            if (confirmed) {
-                await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
-            }
+            await tryConfirmScheduleStartFromEsp(device.deviceId);
+            await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
         }
     }
 
