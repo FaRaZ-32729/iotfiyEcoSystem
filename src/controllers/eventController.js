@@ -709,9 +709,17 @@ const cleanupOneTimeEventAfterEnd = async (schedule) => {
     const endJobId = `schedule-end-${schedule.deviceId}-${id}`;
     const deviceId = schedule.deviceId;
 
-    await removeScheduleJob(startJobId);
-    await removeScheduleJob(endJobId);
-    await removeJobsForEventId(id);
+    // Queue cleanup is best-effort — end job may still be locked by this worker.
+    try {
+        await removeScheduleJob(startJobId);
+        await removeScheduleJob(endJobId);
+        await removeJobsForEventId(id);
+    } catch (err) {
+        console.warn(
+            `⚠️ One-time queue cleanup partial for ${id}: ${err.message}`
+        );
+    }
+
     await Event.findByIdAndDelete(id);
     await clearScheduleStartDelivery(deviceId, "one_time_event_end");
     await emitDeviceScheduleUpdate(deviceId, "one_time_event_end", {

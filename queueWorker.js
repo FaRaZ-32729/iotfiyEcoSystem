@@ -21,11 +21,11 @@ async function finishOneTimeEndIfNeeded(schedule, jobType, success) {
     try {
         await cleanupOneTimeEventAfterEnd(schedule);
     } catch (err) {
+        // Do not fail/retry the end job — AC command already succeeded.
         console.error(
             `Failed to cleanup one-time event ${schedule._id}:`,
             err.message
         );
-        throw err;
     }
 }
 

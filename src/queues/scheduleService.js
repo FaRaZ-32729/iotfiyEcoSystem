@@ -22,6 +22,10 @@ const removeQueuedJobSafe = async (job) => {
         if (err?.code === -8 || /job scheduler/i.test(msg)) {
             return false;
         }
+        // Active end job cannot remove itself mid-handler; removeOnComplete handles it.
+        if (/locked by another worker/i.test(msg)) {
+            return false;
+        }
         throw err;
     }
 };
