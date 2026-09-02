@@ -11,11 +11,15 @@ async function buildScheduleSocketPayload(deviceId, extra = {}) {
     };
 }
 
-async function emitDeviceScheduleUpdate(deviceId, reason = "schedule_mutation") {
+async function emitDeviceScheduleUpdate(deviceId, reason = "schedule_mutation", extra = {}) {
     if (!deviceId || !global.io) return null;
     try {
-        const payload = await buildScheduleSocketPayload(deviceId);
-        global.io.emit(`device/${deviceId}/schedule`, payload);
+        const payload = await buildScheduleSocketPayload(deviceId, extra);
+        global.io.emit(`device/${deviceId}/schedule`, {
+            ...payload,
+            reason,
+            ...extra,
+        });
         console.log(
             `[SCHEDULE-DEBUG][EMIT] device=${deviceId} reason=${reason} ` +
                 `type=${payload?.type || "?"} eventId=${payload?.event?._id || "none"} ` +

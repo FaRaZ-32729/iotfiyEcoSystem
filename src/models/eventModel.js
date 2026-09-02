@@ -70,7 +70,17 @@ const eventSchema = new mongoose.Schema({
     isRecurring: {
         type: Boolean,
         default: null
-    }
+    },
+
+    /** One-time events: absolute UTC window (set at create) */
+    windowStartAt: {
+        type: Date,
+        default: null,
+    },
+    windowEndAt: {
+        type: Date,
+        default: null,
+    },
 
 }, { timestamps: true });
 

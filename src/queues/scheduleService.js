@@ -301,8 +301,98 @@ const removeJobsForEventId = async (eventId) => {
     }
 };
 
+/**
+ * Run immediate start when a one-time event is created inside its active window.
+ */
+async function runImmediateStartIfInsideWindow(data, { startAt, endAt }) {
+    const now = Date.now();
+    if (now < startAt || now >= endAt) {
+        console.log(`⏭️ One-time event outside active window — no immediate start`);
+        return;
+    }
+
+    const { command = "ON", deviceId } = data;
+
+    console.log(
+        `⚡ One-time event created inside window → immediate ${command} for ${deviceId}`
+    );
+
+    const device = await Device.findOne({ deviceId });
+    if (device?.deviceType === "AC") {
+        const fakeSchedule = {
+            setTemperature: data.setTemperature,
+            command,
+            applyLock: data.applyLock,
+        };
+        await runAcScheduledCommand(device, fakeSchedule, command, {
+            scheduleId: data.eventId,
+            isImmediate: true,
+            reason: "immediate_on_create_inside_window",
+            isScheduleStart: true,
+            scheduleEventId: data.eventId,
+        });
+        return;
+    }
+
+    publishCommand(deviceId, {
+        type: "COMMAND",
+        command: "ON",
+        scheduleId: data.eventId,
+        isImmediate: true,
+    });
+}
+
+/**
+ * One-time scheduling: single delayed start + end jobs (no weekly cron repeat).
+ */
+const addOneTimeScheduleJobs = async ({
+    startJobId,
+    endJobId,
+    data,
+    startAt,
+    endAt,
+}) => {
+    const startDelay = Math.max(0, startAt - Date.now());
+    const endDelay = Math.max(0, endAt - Date.now());
+
+    await scheduleQueue.add(
+        "device-schedule",
+        { ...data, type: "start", oneTime: true },
+        {
+            jobId: startJobId,
+            delay: startDelay,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 2000 },
+            removeOnComplete: true,
+            removeOnFail: false,
+        }
+    );
+
+    await scheduleQueue.add(
+        "device-schedule",
+        { ...data, type: "end", command: "OFF", oneTime: true },
+        {
+            jobId: endJobId,
+            delay: endDelay,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 2000 },
+            removeOnComplete: true,
+            removeOnFail: false,
+        }
+    );
+
+    console.log(
+        `📅 One-time schedule ${data.eventId} start in ${Math.round(startDelay / 1000)}s ` +
+            `end in ${Math.round(endDelay / 1000)}s ` +
+            `(${new Date(startAt).toISOString()} → ${new Date(endAt).toISOString()})`
+    );
+
+    await runImmediateStartIfInsideWindow(data, { startAt, endAt });
+};
+
 module.exports = {
     addScheduleJob,
+    addOneTimeScheduleJobs,
     removeScheduleJob,
     removeJobsForEventId,
 };

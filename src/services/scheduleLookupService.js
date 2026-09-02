@@ -1,5 +1,9 @@
 // Shared CURRENT/NEXT schedule lookup (dashboard + agent).
 const Event = require("../models/eventModel");
+const {
+    isOneTimeSchedulingEvent,
+    hasOneTimeWindow,
+} = require("./oneTimeScheduleUtils");
 
 const DAY_ORDER = [
     "sunday",
@@ -31,6 +35,14 @@ const resolveDays = (sch, currentDay) => {
 };
 
 const isScheduleActiveNow = (sch, currentDay, currentMin) => {
+    // ONE-TIME ONLY — absolute window; recurring uses HH:mm + days below
+    if (hasOneTimeWindow(sch)) {
+        const t = Date.now();
+        const startMs = new Date(sch.windowStartAt).getTime();
+        const endMs = new Date(sch.windowEndAt).getTime();
+        return t >= startMs && t < endMs;
+    }
+
     const days = resolveDays(sch, currentDay);
     const start = toMinutes(sch.startTime);
     const end = toMinutes(sch.endTime);
@@ -50,11 +62,21 @@ const isScheduleActiveNow = (sch, currentDay, currentMin) => {
  * Among multiple selected weekdays, picks the soonest upcoming start.
  */
 const nextStartMs = (sch, now, currentDay) => {
+    // ONE-TIME ONLY — no cron-style next-week rollover
+    if (isOneTimeSchedulingEvent(sch) && sch.windowEndAt) {
+        const endMs = new Date(sch.windowEndAt).getTime();
+        if (Date.now() >= endMs) return null;
+        if (sch.windowStartAt) {
+            const startMs = new Date(sch.windowStartAt).getTime();
+            if (Date.now() < startMs) return startMs;
+        }
+        return null;
+    }
+
     const days = resolveDays(sch, currentDay);
     const startMin = toMinutes(sch.startTime);
     const nowDayIdx = now.getUTCDay();
     const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const isOneTime = !sch.isRecurring || !(sch.days || []).length;
 
     let best = null;
 
@@ -69,8 +91,8 @@ const nextStartMs = (sch, now, currentDay) => {
             deltaDays = 7;
         }
 
-        // One-time events only apply once — no next-week rollover
-        if (isOneTime && deltaDays === 7) continue;
+        // ONE-TIME ONLY — recurring events keep existing next-week logic
+        if (isOneTimeSchedulingEvent(sch) && deltaDays === 7) continue;
 
         const [h, m] = String(sch.startTime)
             .split(":")
@@ -171,12 +193,38 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
         };
 
         if (currentEvent) {
+            // ONE-TIME ONLY — recurring CURRENT card uses HH:mm logic below
+            if (hasOneTimeWindow(currentEvent)) {
+                const startMs = new Date(currentEvent.windowStartAt).getTime();
+                const endMs = new Date(currentEvent.windowEndAt).getTime();
+                const totalDuration = Math.max(
+                    0,
+                    Math.floor((endMs - startMs) / (1000 * 60))
+                );
+                const remainingMinutes = Math.max(
+                    0,
+                    Math.floor((endMs - now.getTime()) / (1000 * 60))
+                );
+
+                console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
+                return {
+                    type: "CURRENT",
+                    event: currentEvent,
+                    totalDurationMinutes: totalDuration,
+                    totalDurationText: `${Math.floor(totalDuration / 60)}h ${totalDuration % 60}m`,
+                    remainingMinutes: remainingMinutes,
+                    remainingText: `${remainingMinutes} min remaining`,
+                };
+            }
+
             const totalDuration = calculateTotalDuration(
                 currentEvent.startTime,
                 currentEvent.endTime
             );
 
-            const [endHour, endMinute] = currentEvent.endTime.split(":").map(Number);
+            const [endHour, endMinute] = currentEvent.endTime
+                .split(":")
+                .map(Number);
             let endDate = new Date(
                 Date.UTC(
                     now.getUTCFullYear(),

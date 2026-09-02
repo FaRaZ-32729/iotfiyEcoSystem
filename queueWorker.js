@@ -8,11 +8,26 @@ const dbConnection = require("./src/config/dbConnection");
 const Device = require("./src/models/deviceModel");
 const TriggerSchedule = require("./src/models/triggerEventModel");
 const { runAcScheduledCommand, runAcOffEventEnd, runAcConditionalUnlockAtEventEnd, eventUsesLock, emitAcDeviceLive } = require("./src/services/acScheduleHelper");
+const { cleanupOneTimeEventAfterEnd } = require("./src/controllers/eventController");
+const { isOneTimeSchedulingEvent } = require("./src/services/oneTimeScheduleUtils");
 const { clearScheduleStartDelivery } = require("./src/services/acScheduleStartDelivery");
 const { emitDeviceScheduleUpdate } = require("./src/services/scheduleEmitHelper");
 const env = require("dotenv").config();
 
 console.log("✅ Schedule Worker Starting...");
+
+async function finishOneTimeEndIfNeeded(schedule, jobType, success) {
+    if (!success || jobType !== "end" || !isOneTimeSchedulingEvent(schedule)) return;
+    try {
+        await cleanupOneTimeEventAfterEnd(schedule);
+    } catch (err) {
+        console.error(
+            `Failed to cleanup one-time event ${schedule._id}:`,
+            err.message
+        );
+        throw err;
+    }
+}
 
 let mqttConnected = false;
 dbConnection();
@@ -116,6 +131,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
             reason: `cron_worker_${jobType || "end"}`,
         });
         if (success) {
+            await finishOneTimeEndIfNeeded(schedule, jobType, true);
             return { success: true };
         }
         throw new Error(`Device ${deviceId} OFF event end unlock failed`);
@@ -190,6 +206,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
                 }
             }
             console.log(`✅ AC command "${effectiveCommand}" sent to ${deviceId}`);
+            await finishOneTimeEndIfNeeded(schedule, jobType, true);
             return { success: true };
         }
         console.error(`❌ Failed to publish AC command to ${deviceId}`);
@@ -205,6 +222,7 @@ const scheduleWorker = new Worker("device-schedules", async (job) => {
 
     if (success) {
         console.log(`✅ Command "${effectiveCommand}" sent to ${deviceId}`);
+        await finishOneTimeEndIfNeeded(schedule, jobType, true);
         return { success: true };
     } else {
         console.error(`❌ Failed to publish command to ${deviceId}`);

@@ -1,8 +1,9 @@
 // src/controllers/eventController.js
 const Event = require("../models/eventModel");
 const Device = require("../models/deviceModel");
-const { generateCron, isOvernight } = require("../queues/cronHelper");
-const { addScheduleJob, removeScheduleJob, removeJobsForEventId } = require("../queues/scheduleService");
+const { generateCron, isOvernight, oneTimeFireTimesUtcMs } = require("../queues/cronHelper");
+const { addScheduleJob, addOneTimeScheduleJobs, removeScheduleJob, removeJobsForEventId } = require("../queues/scheduleService");
+const { isOneTimeSchedulingEvent } = require("../services/oneTimeScheduleUtils");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("../queues/scheduleQueue");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
@@ -146,27 +147,33 @@ const createScheduleForDevice = async ({
         endCron = generateCron(endTime, endDays);
 
     } else {
-        // ==================== ONE-TIME SCHEDULE (Today or Overnight) ====================
+        // ==================== ONE-TIME SCHEDULE (today only) ====================
         scheduleType = "one-time";
+        startCron = null;
+        endCron = null;
+    }
 
-        const now = new Date();
-        const currentUTCDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const { startAt, endAt } = !isRecurring
+        ? oneTimeFireTimesUtcMs({
+              startTime,
+              endTime,
+              isOvernight: overnight,
+          })
+        : { startAt: null, endAt: null };
 
-        // Use UTC day
-        const utcDayName = now.toLocaleString('en-US', {
-            weekday: 'long',
-            timeZone: 'UTC'
-        }).toLowerCase();
-
-        startCron = generateCron(startTime, [utcDayName]);
-
-        if (overnight) {
-            const nextDayName = getNextDayName(utcDayName);
-            endCron = generateCron(endTime, [nextDayName]);
-            console.log(`🌙 Overnight one-time schedule: ${utcDayName} ${startTime} → ${nextDayName} ${endTime}`);
-        } else {
-            endCron = generateCron(endTime, [utcDayName]);
-        }
+    if (!isRecurring && endAt <= Date.now()) {
+        return {
+            status: 400,
+            ok: false,
+            schedule: null,
+            device,
+            scheduleType: null,
+            body: {
+                success: false,
+                message:
+                    "One-time event window has already ended. Choose a future start/end time.",
+            },
+        };
     }
 
     const schedule = await Event.create({
@@ -181,6 +188,8 @@ const createScheduleForDevice = async ({
         isRecurring,
         startCron,
         endCron,
+        windowStartAt: !isRecurring ? new Date(startAt) : null,
+        windowEndAt: !isRecurring ? new Date(endAt) : null,
         createdBy: user._id,
         status: "ACTIVE"
     });
@@ -199,6 +208,9 @@ const createScheduleForDevice = async ({
                 ? " applyLock=true"
                 : "") +
             ` device=${deviceId} eventId=${schedule._id} ` +
+            (scheduleType === "one-time"
+                ? `window=${new Date(startAt).toISOString()}→${new Date(endAt).toISOString()} `
+                : "") +
             `startCron="${startCron}" endCron="${endCron}"`
     );
 
@@ -213,20 +225,32 @@ const createScheduleForDevice = async ({
         eventId: schedule._id.toString(),
         isRecurring,
         setTemperature: schedule.setTemperature,
+        applyLock: schedule.applyLock,
+        command: isAc ? eventCommand : "ON",
     };
 
-    // Start: AC uses event command (ON/OFF); THD/others always ON at window start
-    await addScheduleJob(
-        startJobId,
-        { ...jobMeta, command: isAc ? eventCommand : "ON", type: "start" },
-        startCron
-    );
-    // End: always OFF at window end (worker skips end for AC OFF-only events)
-    await addScheduleJob(
-        endJobId,
-        { ...jobMeta, command: "OFF", type: "end" },
-        endCron
-    );
+    if (isRecurring) {
+        // Start: AC uses event command (ON/OFF); THD/others always ON at window start
+        await addScheduleJob(
+            startJobId,
+            { ...jobMeta, command: isAc ? eventCommand : "ON", type: "start" },
+            startCron
+        );
+        // End: always OFF at window end (worker skips end for AC OFF-only events)
+        await addScheduleJob(
+            endJobId,
+            { ...jobMeta, command: "OFF", type: "end" },
+            endCron
+        );
+    } else {
+        await addOneTimeScheduleJobs({
+            startJobId,
+            endJobId,
+            data: jobMeta,
+            startAt,
+            endAt,
+        });
+    }
 
     await emitDeviceScheduleUpdate(deviceId, "event_create");
 
@@ -676,6 +700,27 @@ const toggleScheduleStatus = async (req, res) => {
     }
 };
 
+/** After one-time event end job: remove queue + Mongo (unlock/OFF already applied). */
+const cleanupOneTimeEventAfterEnd = async (schedule) => {
+    if (!isOneTimeSchedulingEvent(schedule)) return;
+
+    const id = schedule._id;
+    const startJobId = `schedule-start-${schedule.deviceId}-${id}`;
+    const endJobId = `schedule-end-${schedule.deviceId}-${id}`;
+    const deviceId = schedule.deviceId;
+
+    await removeScheduleJob(startJobId);
+    await removeScheduleJob(endJobId);
+    await removeJobsForEventId(id);
+    await Event.findByIdAndDelete(id);
+    await clearScheduleStartDelivery(deviceId, "one_time_event_end");
+    await emitDeviceScheduleUpdate(deviceId, "one_time_event_end", {
+        deletedEventId: String(id),
+    });
+
+    console.log(`🗑️ One-time event ${id} removed after end`);
+};
+
 // ==================== DELETE SCHEDULE + REMOVE FROM REDIS ====================
 const deleteScheduleForEvent = async ({ id }) => {
     const schedule = await Event.findById(id);
@@ -739,5 +784,6 @@ module.exports = {
     toggleScheduleStatusForEvent,
     deleteSchedule,
     deleteScheduleForEvent,
+    cleanupOneTimeEventAfterEnd,
     getCurrentOrNextScheduleData,
 };

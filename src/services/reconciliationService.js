@@ -3,6 +3,9 @@ const Schedule = require("../models/eventModel");
 const Device = require("../models/deviceModel");
 const { publishCommand } = require("../mqtt/commandPublisher");
 const { runAcScheduledCommand } = require("./acScheduleHelper");
+const {
+    hasOneTimeWindow,
+} = require("./oneTimeScheduleUtils");
 
 const reconcileMissedCommands = async (deviceId, options = {}) => {
     try {
@@ -55,6 +58,16 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
 
             const { startTime, endTime, days, isOvernight, isRecurring } = schedule;
 
+            // ONE-TIME ONLY — absolute window; recurring unchanged below
+            if (hasOneTimeWindow(schedule)) {
+                const t = Date.now();
+                const startMs = new Date(schedule.windowStartAt).getTime();
+                const endMs = new Date(schedule.windowEndAt).getTime();
+                if (t < startMs || t >= endMs) continue;
+                activeSchedule = schedule;
+                break;
+            }
+
             if (isRecurring && days.length && !days.includes(utcDay)) continue;
 
             let isActiveNow = false;
@@ -81,22 +94,36 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
         }
 
         let durationSeconds = null;
-        const [endHour, endMinute] = activeSchedule.endTime.split(':').map(Number);
 
-            let endDate = new Date(Date.UTC(
-                now.getUTCFullYear(),
-                now.getUTCMonth(),
-                now.getUTCDate(),
-                endHour,
-                endMinute,
-                0
-            ));
+        // ONE-TIME ONLY — recurring duration uses HH:mm end below
+        if (hasOneTimeWindow(activeSchedule)) {
+            const endMs = new Date(activeSchedule.windowEndAt).getTime();
+            durationSeconds = Math.max(
+                0,
+                Math.floor((endMs - now.getTime()) / 1000)
+            );
+        } else {
+            const [endHour, endMinute] = activeSchedule.endTime
+                .split(":")
+                .map(Number);
 
-        if (endDate <= now) {
-            endDate.setUTCDate(endDate.getUTCDate() + 1);
+            let endDate = new Date(
+                Date.UTC(
+                    now.getUTCFullYear(),
+                    now.getUTCMonth(),
+                    now.getUTCDate(),
+                    endHour,
+                    endMinute,
+                    0
+                )
+            );
+
+            if (endDate <= now) {
+                endDate.setUTCDate(endDate.getUTCDate() + 1);
+            }
+
+            durationSeconds = Math.floor((endDate - now) / 1000);
         }
-
-        durationSeconds = Math.floor((endDate - now) / 1000);
 
         const eventCommand = activeSchedule.command || "ON";
 
