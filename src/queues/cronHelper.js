@@ -6,23 +6,26 @@ const dayMap = {
     wednesday: 3,
     thursday: 4,
     friday: 5,
-    saturday: 6
+    saturday: 6,
 };
 
 const generateCron = (time, days) => {
     const [hour, minute] = time.split(":").map(Number);
 
-    const cronDays = days.map(d => {
-        const key = d.toLowerCase().trim();
-        if (!(key in dayMap)) throw new Error(`Invalid day: ${d}`);
-        return dayMap[key];
-    }).join(",");
+    const cronDays = days
+        .map((d) => {
+            const key = d.toLowerCase().trim();
+            if (!(key in dayMap)) throw new Error(`Invalid day: ${d}`);
+            return dayMap[key];
+        })
+        .join(",");
 
     return `${minute} ${hour} * * ${cronDays}`;
 };
 
+/** UTC HH:mm strings — same rule used for recurring events at create + lookup. */
 const isOvernight = (startTime, endTime) => {
-    return startTime > endTime;
+    return String(startTime) > String(endTime);
 };
 
 const parseHmToMinutes = (time) => {
@@ -42,46 +45,45 @@ const parseHmToMinutes = (time) => {
     return hour * 60 + minute;
 };
 
-/**
- * Next UTC instant at HH:mm on or after `afterMs` (same pattern as acKit
- * nextOneTimeOccurrenceUtcMs, but times are already stored as UTC HH:mm).
- */
-function nextUtcHmOccurrenceUtcMs(utcHm, afterMs = Date.now()) {
-    const total = parseHmToMinutes(utcHm);
-    const hour = Math.floor(total / 60);
-    const minute = total % 60;
-    const now = new Date(afterMs);
-
-    let candidate = Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate(),
-        hour,
-        minute,
-        0,
-        0
-    );
-
-    // If that clock time already passed today, use tomorrow (acKit +1500ms grace)
-    if (candidate <= afterMs + 1500) {
-        candidate += 24 * 60 * 60 * 1000;
-    }
-
-    return candidate;
+function formatUtcHm(date) {
+    return `${String(date.getUTCHours()).padStart(2, "0")}:${String(
+        date.getUTCMinutes()
+    ).padStart(2, "0")}`;
 }
 
 /**
- * Absolute UTC start/end for a one-time event.
+ * Is `currentTimeHm` inside [startTime, endTime) in UTC?
+ * Same logic as recurring `addScheduleJob` immediate trigger and
+ * `scheduleLookupService.isScheduleActiveNow` (HH:mm path).
+ */
+function isUtcTimeInsideEventWindow({
+    currentTimeHm,
+    startTime,
+    endTime,
+    isOvernight: overnightFlag,
+}) {
+    const overnight =
+        overnightFlag || String(endTime) <= String(startTime);
+
+    if (!overnight) {
+        return currentTimeHm >= startTime && currentTimeHm < endTime;
+    }
+    return currentTimeHm >= startTime || currentTimeHm < endTime;
+}
+
+/**
+ * Build absolute UTC window for ONE-TIME events only (isRecurring === false).
  *
- * Inputs are UTC HH:mm (frontend/agent already converted local → UTC).
- * `isOvernight` is computed on those UTC strings (same as recurring events).
+ * Recurring events do NOT use this — they use weekly cron on `startTime`/`endTime`
+ * + `days` (+ `shiftDays` for overnight end cron).
  *
- * Examples (PKT = UTC+5):
- * - Fri 02:30–06:00 local → Thu 21:30 – Fri 01:30 UTC, isOvernight=true
- *   → end is on the UTC calendar day AFTER start (Fri 01:30).
- * - Fri 23:00–Sat 06:00 local → Fri 18:00 – Sat 01:00 UTC, isOvernight=true.
- *
- * End is always anchored to startAt's UTC date (+1 day when overnight).
+ * Rules (UTC, times already converted from UI local):
+ * 1. Anchor to the UTC calendar day at create (`afterMs`).
+ * 2. Overnight morning tail: if overnight AND now < endTime, the window started
+ *    YESTERDAY (same as recurring `prevUtcDay` check in addScheduleJob).
+ * 3. startAt = anchorDay @ startTime; endAt = anchorDay or +1 day @ endTime.
+ * 4. Start may be in the past if user creates mid-window — that is OK.
+ * 5. Caller rejects if endAt <= now (window already over).
  */
 function oneTimeFireTimesUtcMs({
     startTime,
@@ -89,23 +91,36 @@ function oneTimeFireTimesUtcMs({
     isOvernight: overnightFlag = false,
     afterMs = Date.now(),
 }) {
-    const startAt = nextUtcHmOccurrenceUtcMs(startTime, afterMs);
-
-    const endParts = parseHmToMinutes(endTime);
-    const eh = Math.floor(endParts / 60);
-    const em = endParts % 60;
-
-    const startDate = new Date(startAt);
-    const sy = startDate.getUTCFullYear();
-    const sm = startDate.getUTCMonth();
-    const sd = startDate.getUTCDate();
-
+    const now = new Date(afterMs);
     const overnight =
         overnightFlag || String(endTime) <= String(startTime);
 
+    let anchorY = now.getUTCFullYear();
+    let anchorM = now.getUTCMonth();
+    let anchorD = now.getUTCDate();
+
+    const currentHm = formatUtcHm(now);
+
+    // Overnight morning segment: e.g. window 18:00→01:00, now 00:30 → anchor yesterday
+    if (overnight && currentHm < endTime) {
+        const prev = new Date(Date.UTC(anchorY, anchorM, anchorD - 1));
+        anchorY = prev.getUTCFullYear();
+        anchorM = prev.getUTCMonth();
+        anchorD = prev.getUTCDate();
+    }
+
+    const startParts = parseHmToMinutes(startTime);
+    const endParts = parseHmToMinutes(endTime);
+    const sh = Math.floor(startParts / 60);
+    const sm = startParts % 60;
+    const eh = Math.floor(endParts / 60);
+    const em = endParts % 60;
+
+    const startAt = Date.UTC(anchorY, anchorM, anchorD, sh, sm, 0, 0);
+
     let endAt;
     if (overnight) {
-        const nextDay = new Date(Date.UTC(sy, sm, sd + 1));
+        const nextDay = new Date(Date.UTC(anchorY, anchorM, anchorD + 1));
         endAt = Date.UTC(
             nextDay.getUTCFullYear(),
             nextDay.getUTCMonth(),
@@ -116,19 +131,25 @@ function oneTimeFireTimesUtcMs({
             0
         );
     } else {
-        endAt = Date.UTC(sy, sm, sd, eh, em, 0, 0);
+        endAt = Date.UTC(anchorY, anchorM, anchorD, eh, em, 0, 0);
     }
 
     if (endAt <= startAt) {
         endAt += 24 * 60 * 60 * 1000;
     }
 
-    return { startAt, endAt };
+    return { startAt, endAt, isOvernight: overnight };
+}
+
+function isMillisInsideWindow(nowMs, startAt, endAt) {
+    return nowMs >= startAt && nowMs < endAt;
 }
 
 module.exports = {
     generateCron,
     isOvernight,
     oneTimeFireTimesUtcMs,
-    nextUtcHmOccurrenceUtcMs,
+    isUtcTimeInsideEventWindow,
+    isMillisInsideWindow,
+    formatUtcHm,
 };

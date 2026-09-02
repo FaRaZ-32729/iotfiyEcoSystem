@@ -3,6 +3,11 @@ const { publishCommand } = require("../mqtt/commandPublisher");
 const scheduleQueue = require("./scheduleQueue");
 const Device = require("../models/deviceModel");
 const { runAcScheduledCommand } = require("../services/acScheduleHelper");
+const {
+    isOvernight,
+    isUtcTimeInsideEventWindow,
+    isMillisInsideWindow,
+} = require("./cronHelper");
 
 /** BullMQ 5 cron instances use ids like repeat:<hash>:<ts> — not removable via job.remove() */
 const isSchedulerInstanceJob = (job) => String(job?.id || "").startsWith("repeat:");
@@ -109,7 +114,7 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
         // ==================== IMMEDIATE TRIGGER LOGIC (Only for TODAY) ====================
         if (data.type === "start") {
             const { startTime, endTime, command = "ON" } = data;
-            const overnight = !!(startTime && endTime && startTime > endTime);
+            const overnight = isOvernight(startTime, endTime);
 
             const dayOrder = [
                 "sunday",
@@ -140,11 +145,12 @@ const addScheduleJob = async (jobId, data, cronExpression) => {
                     (overnight ? " (overnight)" : "")
             );
 
-            // Same-day: start <= now < end
-            // Overnight: now >= start OR now < end (crosses midnight UTC)
-            const isCurrentlyActive = overnight
-                ? currentTime >= startTime || currentTime < endTime
-                : currentTime >= startTime && currentTime < endTime;
+            const isCurrentlyActive = isUtcTimeInsideEventWindow({
+                currentTimeHm: currentTime,
+                startTime,
+                endTime,
+                isOvernight: overnight,
+            });
 
             if (isCurrentlyActive) {
                 console.log(`⚡ Current time is INSIDE active window → Sending immediate ${command} command...`);
@@ -302,19 +308,25 @@ const removeJobsForEventId = async (eventId) => {
 };
 
 /**
- * Run immediate start when a one-time event is created inside its active window.
+ * ONE-TIME only: fire start command immediately when create lands inside window.
+ * Uses absolute windowStartAt/windowEndAt (ms), not HH:mm re-parse.
  */
 async function runImmediateStartIfInsideWindow(data, { startAt, endAt }) {
     const now = Date.now();
-    if (now < startAt || now >= endAt) {
-        console.log(`⏭️ One-time event outside active window — no immediate start`);
+    if (!isMillisInsideWindow(now, startAt, endAt)) {
+        console.log(
+            `⏭️ One-time outside window now=${new Date(now).toISOString()} ` +
+                `window=${new Date(startAt).toISOString()}→${new Date(endAt).toISOString()}`
+        );
         return;
     }
 
-    const { command = "ON", deviceId } = data;
+    const command = data.command || "ON";
+    const { deviceId } = data;
 
     console.log(
-        `⚡ One-time event created inside window → immediate ${command} for ${deviceId}`
+        `⚡ One-time inside window → immediate ${command} for ${deviceId} ` +
+            `(${new Date(startAt).toISOString()}→${new Date(endAt).toISOString()})`
     );
 
     const device = await Device.findOne({ deviceId });
@@ -343,7 +355,8 @@ async function runImmediateStartIfInsideWindow(data, { startAt, endAt }) {
 }
 
 /**
- * One-time scheduling: single delayed start + end jobs (no weekly cron repeat).
+ * ONE-TIME only: delayed start + end jobs (recurring uses weekly cron instead).
+ * Start job → event.command (ON/OFF). End job → OFF for ON events; worker handles OFF-event unlock.
  */
 const addOneTimeScheduleJobs = async ({
     startJobId,
@@ -352,12 +365,14 @@ const addOneTimeScheduleJobs = async ({
     startAt,
     endAt,
 }) => {
-    const startDelay = Math.max(0, startAt - Date.now());
-    const endDelay = Math.max(0, endAt - Date.now());
+    const now = Date.now();
+    const startDelay = Math.max(0, startAt - now);
+    const endDelay = Math.max(0, endAt - now);
+    const startCommand = data.command || "ON";
 
     await scheduleQueue.add(
         "device-schedule",
-        { ...data, type: "start", oneTime: true },
+        { ...data, type: "start", command: startCommand, oneTime: true },
         {
             jobId: startJobId,
             delay: startDelay,
@@ -382,8 +397,8 @@ const addOneTimeScheduleJobs = async ({
     );
 
     console.log(
-        `📅 One-time schedule ${data.eventId} start in ${Math.round(startDelay / 1000)}s ` +
-            `end in ${Math.round(endDelay / 1000)}s ` +
+        `📅 One-time ${data.eventId} start in ${Math.round(startDelay / 1000)}s ` +
+            `end in ${Math.round(endDelay / 1000)}s cmd=${startCommand} ` +
             `(${new Date(startAt).toISOString()} → ${new Date(endAt).toISOString()})`
     );
 

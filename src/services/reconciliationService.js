@@ -6,6 +6,7 @@ const { runAcScheduledCommand } = require("./acScheduleHelper");
 const {
     hasOneTimeWindow,
 } = require("./oneTimeScheduleUtils");
+const { isUtcTimeInsideEventWindow } = require("../queues/cronHelper");
 
 const reconcileMissedCommands = async (deviceId, options = {}) => {
     try {
@@ -70,17 +71,12 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
 
             if (isRecurring && days.length && !days.includes(utcDay)) continue;
 
-            let isActiveNow = false;
-
-            if (!isOvernight) {
-                if (currentTime >= startTime && currentTime < endTime) {
-                    isActiveNow = true;
-                }
-            } else {
-                if (currentTime >= startTime || currentTime < endTime) {
-                    isActiveNow = true;
-                }
-            }
+            let isActiveNow = isUtcTimeInsideEventWindow({
+                currentTimeHm: currentTime,
+                startTime,
+                endTime,
+                isOvernight,
+            });
 
             if (isActiveNow) {
                 activeSchedule = schedule;
