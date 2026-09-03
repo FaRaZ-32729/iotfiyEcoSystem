@@ -9,6 +9,7 @@ const { reconcileMissedCommands } = require("../services/reconciliationService")
 const {
     markPendingReconnectReconcile,
     clearPendingReconnectReconcile,
+    consumeRecentEspSync,
 } = require("../services/acReconnectTracker");
 const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
 const { processTriggerDeviceData } = require("../services/triggerProcessor");
@@ -210,6 +211,13 @@ const setupMessageHandler = (client) => {
                                 console.log(
                                     `[AC-IR-DEBUG] skip reconnect queue device=${deviceId} ` +
                                         `reason=already_online (no IR)`
+                                );
+                            } else if (consumeRecentEspSync(deviceId)) {
+                                // Race: ESP /data source:sync arrived before this status msg.
+                                // Steps 2–4 already ran in schedulingProcessor — do not wait again.
+                                console.log(
+                                    `[AC-RECONNECT] device=${deviceId} offline→online — ` +
+                                        `ESP sync already processed (skip pending wait)`
                                 );
                             } else {
                                 console.log(

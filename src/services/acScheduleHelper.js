@@ -522,7 +522,11 @@ async function applyUnlockedEspRomToDashboard(device, espSnapshot, reason = "pos
         updates.push(`state→${espState}`);
     }
 
-    if (espTemp != null && device.setTemperature !== espTemp) {
+    const mongoTemp = Number(device.setTemperature);
+    if (
+        espTemp != null &&
+        (!Number.isFinite(mongoTemp) || mongoTemp !== espTemp)
+    ) {
         device.setTemperature = espTemp;
         updates.push(`setTemperature→${espTemp}`);
     }

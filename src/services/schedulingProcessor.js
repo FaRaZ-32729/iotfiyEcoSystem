@@ -10,6 +10,7 @@ const {
     isPendingReconnectReconcile,
     clearPendingReconnectReconcile,
     getPendingReconnectAgeMs,
+    noteEspSyncProcessed,
 } = require("./acReconnectTracker");
 const { reconcileMissedCommands } = require("./reconciliationService");
 const { reconcileLockedAcAfterReconnect, applyUnlockedEspRomToDashboard } = require("./acScheduleHelper");
@@ -409,14 +410,15 @@ const processSchedulingDeviceData = async (device, payload) => {
         await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
     }
 
-    // Step 2: after offline→online, ESP publishes source:sync — reconcile using
-    // ESP ROM truth (state + setpoint) vs any active event window.
-    if (
-        isPendingReconnectReconcile(device.deviceId) &&
-        payloadSource === "sync"
-    ) {
+    // ESP publishes source:sync once on MQTT connect (often BEFORE status=online).
+    // Always run Steps 2–4 for AC on sync — do not require pending (fixes race).
+    if (isAc && payloadSource === "sync") {
+        const wasPending = isPendingReconnectReconcile(device.deviceId);
         const pendingMs = getPendingReconnectAgeMs(device.deviceId);
-        clearPendingReconnectReconcile(device.deviceId);
+        if (wasPending) {
+            clearPendingReconnectReconcile(device.deviceId);
+        }
+        noteEspSyncProcessed(device.deviceId);
 
         const espState =
             payload.state !== undefined
@@ -424,21 +426,19 @@ const processSchedulingDeviceData = async (device, payload) => {
                 : device.state;
 
         let espSetTemp = null;
-        if (isAc) {
-            const raw =
-                payload.setTemperature !== undefined
-                    ? payload.setTemperature
-                    : payload.temperature;
-            const n = Number(raw);
-            if (Number.isFinite(n) && n >= 16 && n <= 30) {
-                espSetTemp = n;
-            }
+        const raw =
+            payload.setTemperature !== undefined
+                ? payload.setTemperature
+                : payload.temperature;
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 16 && n <= 30) {
+            espSetTemp = n;
         }
 
         console.log(
             `[AC-RECONNECT] ESP sync device=${device.deviceId} ` +
-                `pendingFor=${pendingMs ?? "?"}ms state=${espState} ` +
-                `espSetTemp=${espSetTemp ?? "-"} → post-sync reconcile`
+                `pending=${wasPending} pendingFor=${pendingMs ?? "n/a"}ms ` +
+                `state=${espState} espSetTemp=${espSetTemp ?? "-"} → post-sync reconcile`
         );
 
         const reconcileResult = await reconcileMissedCommands(device.deviceId, {
@@ -449,8 +449,8 @@ const processSchedulingDeviceData = async (device, payload) => {
             },
         });
 
-        // Step 3: locked devices — always resync lock to ESP; dashboard wins when no event.
-        if (isAc && device.acLocked) {
+        // Step 3: locked — lock resync; dashboard wins when no event.
+        if (device.acLocked) {
             const freshDevice = await Device.findOne({ deviceId: device.deviceId });
             if (freshDevice?.acLocked) {
                 await reconcileLockedAcAfterReconnect(
@@ -462,7 +462,7 @@ const processSchedulingDeviceData = async (device, payload) => {
                     }
                 );
             }
-        } else if (isAc && reconcileResult?.hadActiveEvent !== true) {
+        } else if (reconcileResult?.hadActiveEvent !== true) {
             // Step 4: unlocked + no active event — ESP ROM → dashboard/UI.
             const freshDevice = await Device.findOne({ deviceId: device.deviceId });
             if (freshDevice && !freshDevice.acLocked) {
