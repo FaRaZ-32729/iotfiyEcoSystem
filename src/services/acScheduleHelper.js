@@ -190,8 +190,17 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
             : null;
     const reason = options.reason || "unknown";
     const cmd = String(command || "").toUpperCase();
-    const currentState = String(device.state || "").toUpperCase();
-    const currentTemp = Number(device.setTemperature);
+    const usingEspSnapshot =
+        options.actualEspState != null || options.actualEspSetTemp != null;
+    const currentState =
+        options.actualEspState != null
+            ? String(options.actualEspState).toUpperCase()
+            : String(device.state || "").toUpperCase();
+    const currentTemp =
+        options.actualEspSetTemp != null &&
+        Number.isFinite(Number(options.actualEspSetTemp))
+            ? Number(options.actualEspSetTemp)
+            : Number(device.setTemperature);
     const targetTemp =
         setTemperature != null && Number.isFinite(Number(setTemperature))
             ? Number(setTemperature)
@@ -200,7 +209,8 @@ const runAcScheduledCommand = async (device, schedule, command, options = {}) =>
     console.log(
         `[AC-IR-DEBUG] runAcScheduledCommand device=${device.deviceId} ` +
             `cmd=${cmd} temp=${targetTemp ?? "-"} reason=${reason} ` +
-            `deviceState=${currentState} deviceTemp=${
+            `${usingEspSnapshot ? "espSnapshot" : "mongo"}State=${currentState} ` +
+            `${usingEspSnapshot ? "espSnapshot" : "mongo"}Temp=${
                 Number.isFinite(currentTemp) ? currentTemp : "-"
             } at=${new Date().toISOString()}`
     );
@@ -384,6 +394,157 @@ const runAcOffEventEnd = async (device, schedule, options = {}) => {
     return true;
 };
 
+/**
+ * Push lock MQTT to ESP after reconnect (ESP reboot clears gLockMode in RAM).
+ * Always sends — does not skip when Mongo already acLocked.
+ */
+async function resyncAcLockToEsp(device, reason = "reconnect") {
+    if (!device?.acLocked) return false;
+
+    const state = stateToAckit(device.state) || "off";
+    const temp = Number(device.setTemperature);
+    const lockOk = publishAcRemote(device.deviceId, {
+        remote: lockToRemote(true),
+        state,
+        temperature: Number.isFinite(temp) ? temp : null,
+    });
+
+    console.log(
+        `[AC-RECONNECT] lock resync device=${device.deviceId} reason=${reason} ` +
+            `state=${state} temp=${Number.isFinite(temp) ? temp : "-"} ok=${lockOk}`
+    );
+    return lockOk;
+}
+
+/**
+ * Locked + no active event: dashboard state/temp wins over ESP ROM.
+ */
+async function applyLockedDashboardVsEsp(device, espSnapshot, reason = "reconnect") {
+    const dashboardState = String(device.state || "OFF").toUpperCase();
+    const dashboardTemp = Number(device.setTemperature);
+
+    const espState =
+        espSnapshot?.state != null
+            ? String(espSnapshot.state).toUpperCase()
+            : dashboardState;
+    const espTemp =
+        espSnapshot?.setTemperature != null &&
+        Number.isFinite(Number(espSnapshot.setTemperature))
+            ? Number(espSnapshot.setTemperature)
+            : null;
+
+    const stateMismatch = espState !== dashboardState;
+    const tempMismatch =
+        dashboardState === "ON" &&
+        Number.isFinite(dashboardTemp) &&
+        espTemp != null &&
+        espTemp !== dashboardTemp;
+
+    if (!stateMismatch && !tempMismatch) {
+        console.log(
+            `[AC-RECONNECT] locked device=${device.deviceId} ESP matches dashboard ` +
+                `(${dashboardState}@${Number.isFinite(dashboardTemp) ? dashboardTemp : "-"}) — IR skip`
+        );
+        return { applied: false };
+    }
+
+    console.log(
+        `[AC-RECONNECT] locked mismatch device=${device.deviceId} reason=${reason} ` +
+            `esp=${espState}@${espTemp ?? "-"} dashboard=${dashboardState}@${
+                Number.isFinite(dashboardTemp) ? dashboardTemp : "-"
+            }`
+    );
+
+    if (stateMismatch) {
+        const tempForCmd =
+            dashboardState === "ON" && Number.isFinite(dashboardTemp)
+                ? dashboardTemp
+                : null;
+        await publishAcMqttCommand(device, dashboardState, tempForCmd);
+        return { applied: true };
+    }
+
+    const tempKey = temperatureToApplyKey(dashboardTemp);
+    if (tempKey) {
+        await publishAcApplyFromBrand(device, tempKey, {
+            state: "on",
+            temperature: dashboardTemp,
+        });
+        return { applied: true };
+    }
+
+    return { applied: false };
+}
+
+/**
+ * Step 3: after post-sync reconnect — lock resync; dashboard baseline when no event.
+ */
+async function reconcileLockedAcAfterReconnect(device, espSnapshot, options = {}) {
+    if (!device || device.deviceType !== "AC" || !device.acLocked) {
+        return { skipped: true, reason: "not_locked_ac" };
+    }
+
+    const reason = options.reason || "post_sync_reconnect_lock";
+    const lockOk = await resyncAcLockToEsp(device, reason);
+
+    if (options.eventReconciled) {
+        console.log(
+            `[AC-RECONNECT] locked device=${device.deviceId} event already reconciled — lock resync only`
+        );
+        return { lockResync: lockOk, stateApply: false, reason: "event_reconciled" };
+    }
+
+    const { applied } = await applyLockedDashboardVsEsp(device, espSnapshot, reason);
+    return { lockResync: lockOk, stateApply: applied };
+}
+
+/**
+ * Step 4: unlocked + no active event — ESP ROM state/temp → Mongo + UI.
+ */
+async function applyUnlockedEspRomToDashboard(device, espSnapshot, reason = "post_sync_reconnect") {
+    if (!device || device.deviceType !== "AC" || device.acLocked) {
+        return { skipped: true, reason: "locked_or_not_ac" };
+    }
+
+    const updates = [];
+    const espState =
+        espSnapshot?.state != null
+            ? String(espSnapshot.state).toUpperCase()
+            : null;
+    const espTemp =
+        espSnapshot?.setTemperature != null &&
+        Number.isFinite(Number(espSnapshot.setTemperature))
+            ? Number(espSnapshot.setTemperature)
+            : null;
+
+    if (espState && ["ON", "OFF"].includes(espState) && device.state !== espState) {
+        device.state = espState;
+        updates.push(`state→${espState}`);
+    }
+
+    if (espTemp != null && device.setTemperature !== espTemp) {
+        device.setTemperature = espTemp;
+        updates.push(`setTemperature→${espTemp}`);
+    }
+
+    if (!updates.length) {
+        console.log(
+            `[AC-RECONNECT] unlocked device=${device.deviceId} ESP ROM matches dashboard — no DB change`
+        );
+        return { updated: false };
+    }
+
+    device.lastUpdateTime = new Date();
+    await device.save();
+    emitAcDeviceLive(device);
+
+    console.log(
+        `[AC-RECONNECT] unlocked ESP ROM → dashboard device=${device.deviceId} ` +
+            `reason=${reason} ${updates.join(" ")}`
+    );
+    return { updated: true, updates };
+}
+
 module.exports = {
     buildAcCommandPayload,
     applyAcScheduleState,
@@ -394,4 +555,7 @@ module.exports = {
     eventUsesLock,
     publishAcMqttCommand,
     publishAcLockReassert,
+    resyncAcLockToEsp,
+    reconcileLockedAcAfterReconnect,
+    applyUnlockedEspRomToDashboard,
 };

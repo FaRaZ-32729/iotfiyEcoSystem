@@ -6,6 +6,10 @@ const Device = require("../models/deviceModel");
 const { processMonitoringDeviceData } = require("../services/monitoringProcessor");
 const { broadcastOTAProgress } = require("../services/otaProgressService");
 const { reconcileMissedCommands } = require("../services/reconciliationService");
+const {
+    markPendingReconnectReconcile,
+    clearPendingReconnectReconcile,
+} = require("../services/acReconnectTracker");
 const { processSchedulingDeviceData } = require("../services/schedulingProcessor");
 const { processTriggerDeviceData } = require("../services/triggerProcessor");
 
@@ -194,27 +198,30 @@ const setupMessageHandler = (client) => {
                         console.log(`📡 Sent ${updatedDevice.category} event for device ${deviceId} | Status: ${newStatus}`);
                     }
 
-                    // ==================== RECONCILIATION (Only Scheduling) ====================
-                    // Only on real offline→online. Re-publishing "online" while already
-                    // online was re-firing power.on+temp during active events (AC beep loop).
-                    if (newStatus === "online" && updatedDevice.category === "scheduling") {
-                        const wasAlreadyOnline = previousStatus === "online";
-                        if (wasAlreadyOnline) {
-                            console.log(
-                                `[AC-IR-DEBUG] skip reconcile device=${deviceId} ` +
-                                    `reason=already_online (no IR)`
-                            );
-                        } else {
-                            console.log(
-                                `[AC-IR-DEBUG] reconcile device=${deviceId} ` +
-                                    `reason=status_offline_to_online`
-                            );
-                            console.log(
-                                `🔄 Triggering reconciliation for Scheduling device: ${deviceId}`
-                            );
-                            await reconcileMissedCommands(deviceId, {
-                                reason: "status_offline_to_online",
-                            });
+                    // ==================== RECONNECT RECONCILE (Scheduling only) ====================
+                    // Step 1: defer until ESP source:sync (Step 2). Heartbeat "online"
+                    // while already online must NOT re-queue reconcile (AC beep loop).
+                    if (updatedDevice.category === "scheduling") {
+                        if (newStatus === "offline") {
+                            clearPendingReconnectReconcile(deviceId);
+                        } else if (newStatus === "online") {
+                            const wasAlreadyOnline = previousStatus === "online";
+                            if (wasAlreadyOnline) {
+                                console.log(
+                                    `[AC-IR-DEBUG] skip reconnect queue device=${deviceId} ` +
+                                        `reason=already_online (no IR)`
+                                );
+                            } else {
+                                console.log(
+                                    `[AC-RECONNECT] device=${deviceId} offline→online — ` +
+                                        `wait for ESP sync before reconcile`
+                                );
+                                markPendingReconnectReconcile(deviceId, () =>
+                                    reconcileMissedCommands(deviceId, {
+                                        reason: "status_offline_to_online_fallback",
+                                    })
+                                );
+                            }
                         }
                     }
 

@@ -40,7 +40,7 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
 
         if (!schedules.length) {
             console.log(`No active schedules for device ${deviceId}`);
-            return;
+            return { hadActiveEvent: false };
         }
 
         let activeSchedule = null;
@@ -86,7 +86,7 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
 
         if (!activeSchedule) {
             console.log(`⏭️  No active schedule window currently for ${deviceId}`);
-            return;
+            return { hadActiveEvent: false };
         }
 
         let durationSeconds = null;
@@ -122,17 +122,37 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
         }
 
         const eventCommand = activeSchedule.command || "ON";
+        const espSnapshot = options.espSnapshot || null;
 
         if (isAc && device) {
+            if (espSnapshot) {
+                console.log(
+                    `[AC-RECONNECT] active event device=${deviceId} ` +
+                        `event=${eventCommand}@${activeSchedule.setTemperature ?? "-"} ` +
+                        `esp=${espSnapshot.state ?? "-"}@${espSnapshot.setTemperature ?? "-"}`
+                );
+            }
             console.log(`✅ Found active AC schedule → Sending ${eventCommand} to ${deviceId}`);
-            await runAcScheduledCommand(device, activeSchedule, eventCommand, {
+            const runOptions = {
                 scheduleId: activeSchedule._id,
                 durationSeconds: eventCommand === "ON" ? durationSeconds : null,
                 reason: `reconcile:${reason}`,
                 isScheduleStart: true,
                 scheduleEventId: activeSchedule._id.toString(),
-            });
-            return;
+            };
+            if (espSnapshot) {
+                if (espSnapshot.state != null) {
+                    runOptions.actualEspState = espSnapshot.state;
+                }
+                if (
+                    espSnapshot.setTemperature != null &&
+                    Number.isFinite(Number(espSnapshot.setTemperature))
+                ) {
+                    runOptions.actualEspSetTemp = Number(espSnapshot.setTemperature);
+                }
+            }
+            await runAcScheduledCommand(device, activeSchedule, eventCommand, runOptions);
+            return { hadActiveEvent: true };
         }
 
         if (eventCommand === "ON") {
@@ -143,12 +163,15 @@ const reconcileMissedCommands = async (deviceId, options = {}) => {
                 scheduleId: activeSchedule._id,
                 durationSeconds: durationSeconds
             });
+            return { hadActiveEvent: true };
         } else {
             console.log(`⏭️ Active schedule command is OFF for non-AC device ${deviceId} — skip reconcile`);
+            return { hadActiveEvent: true };
         }
 
     } catch (error) {
         console.error("Reconciliation Error:", error);
+        return { hadActiveEvent: false, error: error.message };
     }
 };
 

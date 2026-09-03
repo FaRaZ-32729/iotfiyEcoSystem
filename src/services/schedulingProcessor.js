@@ -1,10 +1,18 @@
 // src/services/schedulingProcessor.js
 const checkConditions = require("./conditionChecker");
 const sensorModel = require("../models/sensorModel");
+const Device = require("../models/deviceModel");
 const {
     tryConfirmScheduleStartFromEsp,
 } = require("./acScheduleStartDelivery");
 const { emitDeviceScheduleUpdate } = require("./scheduleEmitHelper");
+const {
+    isPendingReconnectReconcile,
+    clearPendingReconnectReconcile,
+    getPendingReconnectAgeMs,
+} = require("./acReconnectTracker");
+const { reconcileMissedCommands } = require("./reconciliationService");
+const { reconcileLockedAcAfterReconnect, applyUnlockedEspRomToDashboard } = require("./acScheduleHelper");
 
 const VALID_AC_MODES = ["Cool", "Heat", "Dry", "FanOnly", "Auto"];
 const VALID_FAN_SPEEDS = ["Low", "Medium", "High", "Ultra", "Turbo"];
@@ -394,11 +402,76 @@ const processSchedulingDeviceData = async (device, payload) => {
         console.warn(`⚠️ Socket.io not initialized - cannot send live data`);
     }
 
-    if (isAc) {
-        const source = String(payload.source || "").toLowerCase().trim();
-        if (source === "apply") {
-            await tryConfirmScheduleStartFromEsp(device.deviceId);
-            await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
+    const payloadSource = String(payload.source || "").toLowerCase().trim();
+
+    if (isAc && payloadSource === "apply") {
+        await tryConfirmScheduleStartFromEsp(device.deviceId);
+        await emitDeviceScheduleUpdate(device.deviceId, "esp_schedule_apply");
+    }
+
+    // Step 2: after offline→online, ESP publishes source:sync — reconcile using
+    // ESP ROM truth (state + setpoint) vs any active event window.
+    if (
+        isPendingReconnectReconcile(device.deviceId) &&
+        payloadSource === "sync"
+    ) {
+        const pendingMs = getPendingReconnectAgeMs(device.deviceId);
+        clearPendingReconnectReconcile(device.deviceId);
+
+        const espState =
+            payload.state !== undefined
+                ? String(payload.state).toUpperCase().trim()
+                : device.state;
+
+        let espSetTemp = null;
+        if (isAc) {
+            const raw =
+                payload.setTemperature !== undefined
+                    ? payload.setTemperature
+                    : payload.temperature;
+            const n = Number(raw);
+            if (Number.isFinite(n) && n >= 16 && n <= 30) {
+                espSetTemp = n;
+            }
+        }
+
+        console.log(
+            `[AC-RECONNECT] ESP sync device=${device.deviceId} ` +
+                `pendingFor=${pendingMs ?? "?"}ms state=${espState} ` +
+                `espSetTemp=${espSetTemp ?? "-"} → post-sync reconcile`
+        );
+
+        const reconcileResult = await reconcileMissedCommands(device.deviceId, {
+            reason: "post_sync_reconnect",
+            espSnapshot: {
+                state: espState,
+                setTemperature: espSetTemp,
+            },
+        });
+
+        // Step 3: locked devices — always resync lock to ESP; dashboard wins when no event.
+        if (isAc && device.acLocked) {
+            const freshDevice = await Device.findOne({ deviceId: device.deviceId });
+            if (freshDevice?.acLocked) {
+                await reconcileLockedAcAfterReconnect(
+                    freshDevice,
+                    { state: espState, setTemperature: espSetTemp },
+                    {
+                        reason: "post_sync_reconnect_lock",
+                        eventReconciled: reconcileResult?.hadActiveEvent === true,
+                    }
+                );
+            }
+        } else if (isAc && reconcileResult?.hadActiveEvent !== true) {
+            // Step 4: unlocked + no active event — ESP ROM → dashboard/UI.
+            const freshDevice = await Device.findOne({ deviceId: device.deviceId });
+            if (freshDevice && !freshDevice.acLocked) {
+                await applyUnlockedEspRomToDashboard(
+                    freshDevice,
+                    { state: espState, setTemperature: espSetTemp },
+                    "post_sync_reconnect_unlocked"
+                );
+            }
         }
     }
 
