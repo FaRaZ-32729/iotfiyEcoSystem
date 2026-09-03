@@ -140,16 +140,16 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
             status: "ACTIVE",
         }).sort({ startTime: 1 });
 
-        console.log(
-            `[SCHEDULE-DEBUG][LOOKUP] device=${deviceId} utcNow=${currentDay} ${currentTime} ` +
-                `activeEvents=${schedules.length}`
-        );
+        // console.log(
+        //     `[SCHEDULE-DEBUG][LOOKUP] device=${deviceId} utcNow=${currentDay} ${currentTime} ` +
+        //         `activeEvents=${schedules.length}`
+        // );
         for (const sch of schedules) {
-            console.log(
-                `[SCHEDULE-DEBUG][LOOKUP]  event=${sch._id} ` +
-                    `${sch.startTime}-${sch.endTime} days=${JSON.stringify(sch.days)} ` +
-                    `recurring=${sch.isRecurring} overnight=${sch.isOvernight} status=${sch.status}`
-            );
+            // console.log(
+            //     `[SCHEDULE-DEBUG][LOOKUP]  event=${sch._id} ` +
+            //         `${sch.startTime}-${sch.endTime} days=${JSON.stringify(sch.days)} ` +
+            //         `recurring=${sch.isRecurring} overnight=${sch.isOvernight} status=${sch.status}`
+            // );
         }
 
         let currentEvent = null;
@@ -159,17 +159,17 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
         for (const sch of schedules) {
             if (isScheduleActiveNow(sch, currentDay, currentMin)) {
                 currentEvent = sch;
-                console.log(
-                    `[SCHEDULE-DEBUG][LOOKUP]  active-now ${sch._id}`
-                );
+                // console.log(
+                //     `[SCHEDULE-DEBUG][LOOKUP]  active-now ${sch._id}`
+                // );
                 break;
             }
 
             const at = nextStartMs(sch, now, currentDay);
             if (at == null) {
-                console.log(
-                    `[SCHEDULE-DEBUG][LOOKUP]  no-next-start ${sch._id}`
-                );
+                // console.log(
+                //     `[SCHEDULE-DEBUG][LOOKUP]  no-next-start ${sch._id}`
+                // );
                 continue;
             }
 
@@ -206,7 +206,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
                     Math.floor((endMs - now.getTime()) / (1000 * 60))
                 );
 
-                console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
+                // console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
                 return {
                     type: "CURRENT",
                     event: currentEvent,
@@ -239,7 +239,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
 
             const remainingMinutes = Math.floor((endDate - now) / (1000 * 60));
 
-            console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
+            // console.log(`[SCHEDULE-DEBUG][LOOKUP] → CURRENT event=${currentEvent._id}`);
             return {
                 type: "CURRENT",
                 event: currentEvent,
@@ -269,7 +269,7 @@ const getCurrentOrNextScheduleData = async (deviceId) => {
             };
         }
 
-        console.log(`[SCHEDULE-DEBUG][LOOKUP] → NO_EVENT for ${deviceId}`);
+        // console.log(`[SCHEDULE-DEBUG][LOOKUP] → NO_EVENT for ${deviceId}`);
         return {
             type: "NO_EVENT",
             event: null,

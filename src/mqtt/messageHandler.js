@@ -298,9 +298,9 @@ const setupMessageHandler = (client) => {
                 // ==================== DETAILED DEVICE INFO ====================
                 console.log(`✅ Device Found:`);
                 console.log(`   • Device ID     : ${device.deviceId}`);
-                console.log(`   • Device Name   : ${device.deviceName}`);
-                console.log(`   • Device Type   : ${device.deviceType}`);
-                console.log(`   • Category      : ${device.category}`);
+                // console.log(`   • Device Name   : ${device.deviceName}`);
+                // console.log(`   • Device Type   : ${device.deviceType}`);
+                // console.log(`   • Category      : ${device.category}`);
 
                 // ==================== ROUTE BY CATEGORY ====================
                 switch (device.category) {
